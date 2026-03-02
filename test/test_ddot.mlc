@@ -1,0 +1,131 @@
+*---------------------------------------------------------------------*
+* TEST_DDOT - z390 test harness for DDOT                              *
+*                                                                     *
+* Tests:                                                              *
+*   1. Basic: X=[1,2,3,4], Y=[5,6,7,8], N=4                         *
+*      Expected: 1*5 + 2*6 + 3*7 + 4*8 = 5+12+21+32 = 70.0          *
+*   2. N=0: should return 0.0                                        *
+*   3. Orthogonal: X=[1,0], Y=[0,1], N=2 -> expected 0.0              *
+*                                                                     *
+* Result returned in FPR0. We compare against known constants.        *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  epilog
+*
+TEST     PROLOG TSTDDOT
+*
+* ============================================================= *
+* TEST 1: Basic dot product, expect 70.0                        *
+* ============================================================= *
+*
+         WTO   'TEST 1: DDOT [1,2,3,4].[5,6,7,8]'
+*
+         LA    R1,D1PLST
+         L     R15,=V(DDOT)
+         BALR  R14,R15                     Call DDOT -> FPR0
+*
+         CDB   FPR0,D1EXP                  Compare FPR0 to 70.0
+         BE    D1PASS
+         WTO   'FAIL: dot != 70.0'
+         B     DST2
+D1PASS   WTO   'PASS: dot = 70.0'
+*
+* ============================================================= *
+* TEST 2: N=0 -> expect 0.0                                      *
+* ============================================================= *
+*
+DST2     DS    0H
+         WTO   'TEST 2: DDOT N=0'
+*
+         LA    R1,D2PLST
+         L     R15,=V(DDOT)
+         BALR  R14,R15
+*
+         CDB   FPR0,DZERO                  Compare to 0.0
+         BE    D2PASS
+         WTO   'FAIL: N=0 dot != 0.0'
+         B     DST3
+D2PASS   WTO   'PASS: N=0 dot = 0.0'
+*
+* ============================================================= *
+* TEST 3: Orthogonal vectors -> expect 0.0                        *
+* ============================================================= *
+*
+DST3     DS    0H
+         WTO   'TEST 3: DDOT orthogonal'
+*
+         LA    R1,D3PLST
+         L     R15,=V(DDOT)
+         BALR  R14,R15
+*
+         CDB   FPR0,DZERO
+         BE    D3PASS
+         WTO   'FAIL: orthogonal dot != 0.0'
+         B     DDONE
+D3PASS   WTO   'PASS: orthogonal dot = 0.0'
+*
+DDONE    DS    0H
+         WTO   'ALL DDOT TESTS COMPLETE'
+         EPILOG
+*
+* ---- Test 1 data ----
+*
+         DS    0D
+D1N      DC    F'4'
+D1X1     DC    X'3FF0000000000000'         BFP 1.0
+D1X2     DC    X'4000000000000000'         BFP 2.0
+D1X3     DC    X'4008000000000000'         BFP 3.0
+D1X4     DC    X'4010000000000000'         BFP 4.0
+D1INCX   DC    F'1'
+D1Y1     DC    X'4014000000000000'         BFP 5.0
+D1Y2     DC    X'4018000000000000'         BFP 6.0
+D1Y3     DC    X'401C000000000000'         BFP 7.0
+D1Y4     DC    X'4020000000000000'         BFP 8.0
+D1INCY   DC    F'1'
+D1EXP    DC    X'4051800000000000'         BFP 70.0
+*
+D1PLST   DC    A(D1N)
+         DC    A(D1X1)
+         DC    A(D1INCX)
+         DC    A(D1Y1)
+         DC    X'80',AL3(D1INCY)
+*
+* ---- Test 2 data (N=0) ----
+*
+         DS    0D
+D2N      DC    F'0'
+D2X1     DC    X'4058C00000000000'         BFP 99.0
+D2INCX   DC    F'1'
+D2Y1     DC    X'4058C00000000000'         BFP 99.0
+D2INCY   DC    F'1'
+*
+D2PLST   DC    A(D2N)
+         DC    A(D2X1)
+         DC    A(D2INCX)
+         DC    A(D2Y1)
+         DC    X'80',AL3(D2INCY)
+*
+* ---- Test 3 data (orthogonal) ----
+*
+         DS    0D
+D3N      DC    F'2'
+D3X1     DC    X'3FF0000000000000'         BFP 1.0
+D3X2     DC    X'0000000000000000'         BFP 0.0
+D3INCX   DC    F'1'
+D3Y1     DC    X'0000000000000000'         BFP 0.0
+D3Y2     DC    X'3FF0000000000000'         BFP 1.0
+D3INCY   DC    F'1'
+*
+D3PLST   DC    A(D3N)
+         DC    A(D3X1)
+         DC    A(D3INCX)
+         DC    A(D3Y1)
+         DC    X'80',AL3(D3INCY)
+*
+* ---- Common constants ----
+*
+         DS    0D
+DZERO    DC    X'0000000000000000'         BFP 0.0
+*
+         LTORG
+         END   TSTDDOT

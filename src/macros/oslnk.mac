@@ -1,0 +1,41 @@
+.*
+.* zblas — oslnk.mac
+.* Standard OS linkage entry/exit — identical to prolog/epilog
+.* but as named macros for when you want to be explicit about
+.* which calling convention you're using.
+.*
+.* OS linkage:
+.*   R1  = parm list ptr (addrs, high bit set on last)
+.*   R13 = caller's save area (72 bytes min)
+.*   R14 = return address
+.*   R15 = entry point
+.*   Return: R15 (int) or FPR0 (float)
+.*
+.* The standard linkage convention is older than most of the
+.* programmers who maintain it, and will comfortably outlive
+.* them all.
+.*
+         MACRO
+&LBL     OSENTR &NAME
+&LBL     CSECT
+&NAME    DS    0H
+         USING &NAME,R15
+         B     ZBO@&NAME-&NAME.(,R15)      Branch past eyecatcher
+         DC    AL1(L'ZOE@&NAME)            Length byte
+ZOE@&NAME DC   C'&NAME'                    Eyecatcher
+         DC    C' zblas'
+         DS    0H
+ZBO@&NAME DS   0H
+         DROP  R15
+         STM   R14,R12,12(R13)             Save all registers
+         LR    R12,R15                     Base register
+         USING &NAME,R12
+         MEND
+.*
+.*-------------------------------------------------------------------*
+         MACRO
+&LBL     OSXIT
+&LBL     DS    0H
+         LM    R14,R12,12(R13)             Restore all
+         BR    R14                         Return
+         MEND

@@ -1,0 +1,100 @@
+.*
+.* zblas — vfregs.mac
+.* Vector Facility register equates and helper macros.
+.*
+.* z13+ VF: 32 x 128-bit vector registers. Each holds 2 doubles.
+.* FPR0-15 overlap V0-V15 high halves.
+.*
+.* Thirty-two vector registers. Two doubles each. It's not
+.* AVX-512, but at least the CPU doesn't throttle based on mood.
+.*
+.* ---- Vector Register Equates ----
+.*
+V0       EQU   0
+V1       EQU   1
+V2       EQU   2
+V3       EQU   3
+V4       EQU   4
+V5       EQU   5
+V6       EQU   6
+V7       EQU   7
+V8       EQU   8
+V9       EQU   9
+V10      EQU   10
+V11      EQU   11
+V12      EQU   12
+V13      EQU   13
+V14      EQU   14
+V15      EQU   15
+V16      EQU   16
+V17      EQU   17
+V18      EQU   18
+V19      EQU   19
+V20      EQU   20
+V21      EQU   21
+V22      EQU   22
+V23      EQU   23
+V24      EQU   24
+V25      EQU   25
+V26      EQU   26
+V27      EQU   27
+V28      EQU   28
+V29      EQU   29
+V30      EQU   30
+V31      EQU   31
+.*
+.* ---- FPR Equates ----
+.*
+FPR0     EQU   0
+FPR1     EQU   1
+FPR2     EQU   2
+FPR3     EQU   3
+FPR4     EQU   4
+FPR5     EQU   5
+FPR6     EQU   6
+FPR7     EQU   7
+.*
+.*-------------------------------------------------------------------*
+.* VFTEST — Test for Vector Facility via STFLE bit 129.
+.*
+.* After: CC EQ = VF present, CC NE = absent.
+.* Clobbers &TREG and 24 bytes at ZB@STFL.
+.*
+.* We ask the hardware one question: can you do maths with
+.* both lanes? The answer determines if this is 2026 or 1986.
+.*-------------------------------------------------------------------*
+         MACRO
+&LBL     VFTEST &TREG
+&LBL     DS    0H
+         XC    ZB@STFL(24),ZB@STFL         Zero work area first
+         LA    &TREG,2                     3 doublewords (N-1=2)
+         STFLE ZB@STFL                     Store facility list
+         TM    ZB@STFL+16,X'40'            Test bit 129 (VF)
+         MEND
+.*
+.*-------------------------------------------------------------------*
+.* VBCAST — Broadcast double from FPR to both vector lanes.
+.* FPRn overlaps Vn high half, so VREPG element 0 does it.
+.*-------------------------------------------------------------------*
+         MACRO
+&LBL     VBCAST &VR,&FPR
+&LBL     VREPG &VR,&FPR,0                 Replicate elem 0
+         MEND
+.*
+.*-------------------------------------------------------------------*
+.* VHSUM — Horizontal sum of two doubles in vector register.
+.* VR[0] = VR[0] + VR[1]. Result in high half (= FPR if VR<16).
+.* Clobbers V31 as scratch.
+.*-------------------------------------------------------------------*
+         MACRO
+&LBL     VHSUM &VR
+&LBL     VPDI  V31,&VR,&VR,X'4'           Swap: V31[0] = VR[1]
+         VFA   &VR,&VR,V31,3,0            Add: VR[0] += old VR[1]
+         MEND
+.*
+.*-------------------------------------------------------------------*
+.* NOTE: Each source file must provide ZB@STFL:
+.*   DS    0D
+.*   ZB@STFL  DS  3D        (24 bytes, doubleword-aligned)
+.* Defined per-module to avoid duplicate symbols.
+.*-------------------------------------------------------------------*

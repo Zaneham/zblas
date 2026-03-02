@@ -1,0 +1,217 @@
+*---------------------------------------------------------------------*
+* Z390_DDOT - Self-contained z390 test for DDOT scalar path.          *
+* One file, two CSECTs, proper OS linkage. No VF instructions.        *
+* All floating-point constants are IEEE 754 BFP (DC X'...').          *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+* ---- TEST HARNESS ----
+*
+TSTDDOT  CSECT
+         STM   R14,R12,12(R13)            Save z390 context
+         LR    R12,R15                     Base = entry point
+         USING TSTDDOT,R12
+         LA    R10,TSAVE                   Our save area
+         ST    R13,4(,R10)                 Back-chain to z390 SA
+         ST    R10,8(,R13)                 Forward-chain
+         LR    R13,R10                     R13 = our SA
+*
+         WTO   'ZBLAS DDOT z390 test'
+*
+* ---- TEST 1: [1,2,3,4].[5,6,7,8] = 70 ----
+*
+         WTO   'T1: basic dot product'
+         LA    R1,T1PL
+         L     R15,=A(DDOT)
+         BALR  R14,R15
+* FPR0 has the result
+         CDB   0,T1EXP
+         BE    T1P1
+         WTO   'FAIL dot!=70'
+         B     TST2
+T1P1     WTO   'PASS dot=70'
+*
+* ---- TEST 2: N=0 should return 0.0 ----
+*
+TST2     DS    0H
+         WTO   'T2: N=0'
+         LA    R1,T2PL
+         L     R15,=A(DDOT)
+         BALR  R14,R15
+         CDB   0,DZERO
+         BE    T2P1
+         WTO   'FAIL N=0'
+         B     TST3
+T2P1     WTO   'PASS N=0'
+*
+* ---- TEST 3: orthogonal [1,0].[0,1] = 0 ----
+*
+TST3     DS    0H
+         WTO   'T3: orthogonal'
+         LA    R1,T3PL
+         L     R15,=A(DDOT)
+         BALR  R14,R15
+         CDB   0,DZERO
+         BE    T3P1
+         WTO   'FAIL ortho!=0'
+         B     TST4
+T3P1     WTO   'PASS ortho=0'
+*
+* ---- TEST 4: N=1, [3].[7] = 21 ----
+*
+TST4     DS    0H
+         WTO   'T4: N=1'
+         LA    R1,T4PL
+         L     R15,=A(DDOT)
+         BALR  R14,R15
+         CDB   0,T4EXP
+         BE    T4P1
+         WTO   'FAIL dot!=21'
+         B     DONE
+T4P1     WTO   'PASS dot=21'
+*
+* ---- DONE ----
+*
+DONE     DS    0H
+         WTO   'DDOT: ALL TESTS DONE'
+         L     R13,4(,R13)                 Restore z390 SA
+         LM    R14,R12,12(R13)             Restore z390 regs
+         SR    R15,R15                     RC=0
+         BR    R14
+*
+* ---- Test data (all doubles are IEEE 754 BFP hex) ----
+*
+TSAVE    DS    18F                         Our save area
+         DS    0D
+* BFP 0.0
+DZERO    DC    X'0000000000000000'
+*
+* Test 1: [1,2,3,4].[5,6,7,8] = 70
+T1N      DC    F'4'
+         DS    0D
+T1X      DC    X'3FF0000000000000'         BFP 1.0
+         DC    X'4000000000000000'         BFP 2.0
+         DC    X'4008000000000000'         BFP 3.0
+         DC    X'4010000000000000'         BFP 4.0
+T1IX     DC    F'1'
+         DS    0D
+T1Y      DC    X'4014000000000000'         BFP 5.0
+         DC    X'4018000000000000'         BFP 6.0
+         DC    X'401C000000000000'         BFP 7.0
+         DC    X'4020000000000000'         BFP 8.0
+T1IY     DC    F'1'
+         DS    0D
+T1EXP    DC    X'4051800000000000'         BFP 70.0
+T1PL     DC    A(T1N,T1X,T1IX,T1Y)
+         DC    X'80',AL3(T1IY)
+*
+* Test 2: N=0
+         DS    0D
+T2N      DC    F'0'
+         DS    0D
+T2X      DC    X'3FF0000000000000'         BFP 1.0
+T2IX     DC    F'1'
+         DS    0D
+T2Y      DC    X'3FF0000000000000'         BFP 1.0
+T2IY     DC    F'1'
+T2PL     DC    A(T2N,T2X,T2IX,T2Y)
+         DC    X'80',AL3(T2IY)
+*
+* Test 3: orthogonal [1,0].[0,1] = 0
+         DS    0D
+T3N      DC    F'2'
+         DS    0D
+T3X      DC    X'3FF0000000000000'         BFP 1.0
+         DC    X'0000000000000000'         BFP 0.0
+T3IX     DC    F'1'
+         DS    0D
+T3Y      DC    X'0000000000000000'         BFP 0.0
+         DC    X'3FF0000000000000'         BFP 1.0
+T3IY     DC    F'1'
+T3PL     DC    A(T3N,T3X,T3IX,T3Y)
+         DC    X'80',AL3(T3IY)
+*
+* Test 4: N=1, [3].[7] = 21
+         DS    0D
+T4N      DC    F'1'
+         DS    0D
+T4X      DC    X'4008000000000000'         BFP 3.0
+T4IX     DC    F'1'
+         DS    0D
+T4Y      DC    X'401C000000000000'         BFP 7.0
+T4IY     DC    F'1'
+         DS    0D
+T4EXP    DC    X'4035000000000000'         BFP 21.0
+T4PL     DC    A(T4N,T4X,T4IX,T4Y)
+         DC    X'80',AL3(T4IY)
+         LTORG
+         DROP  R12
+*
+* ============================================================= *
+* DDOT - scalar only (no VF, no STFLE, z390 safe)                *
+* Returns dot product in FPR0.                                    *
+* Parm list: N, DX, INCX, DY, INCY (5 parms, not 6)             *
+* ============================================================= *
+*
+DDOT     CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING DDOT,R12
+         LR    R11,R1                      Parm ptr
+         SDBR  0,0                         FPR0 = 0.0
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   DDT@RT
+         L     R4,4(,R11)                  DX
+         L     R5,8(,R11)
+         L     R5,0(,R5)                   INCX
+         L     R6,12(,R11)                 DY
+         L     R7,16(,R11)
+         L     R7,0(,R7)                   INCY
+         SLA   R5,3                        byte stride
+         SLA   R7,3
+         LTR   R5,R5
+         BNM   DDT@AY
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R5
+         LCR   R0,R0
+         AR    R4,R0
+DDT@AY   DS    0H
+         LTR   R7,R7
+         BNM   DDT@SL
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R7
+         LCR   R0,R0
+         AR    R6,R0
+DDT@SL   DS    0H
+         LR    R8,R2
+DDT@S1   DS    0H
+         LD    2,0(,R4)
+         MDB   2,0(,R6)
+         ADBR  0,2                         FPR0 += X(i)*Y(i)
+         AR    R4,R5
+         AR    R6,R7
+         BCT   R8,DDT@S1
+DDT@RT   DS    0H
+         LM    R14,R12,12(R13)
+         BR    R14
+         LTORG
+         END   TSTDDOT

@@ -1,0 +1,415 @@
+*---------------------------------------------------------------------*
+* Z390_DGER - Self-contained z390 test for DGER scalar path.          *
+* Two CSECTs: test harness + scalar DGER. No VF, no STFLE.            *
+* All doubles are IEEE 754 BFP (DC X'...'). Column-major 2x2.         *
+*                                                                     *
+* Rank-1 update: the bit of linear algebra that does exactly           *
+* what it says on the tin, no transpose, no beta, no drama.            *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+* ---- TEST HARNESS ----
+*
+TSTDGER  CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING TSTDGER,R12
+         LA    R10,TSAVE
+         ST    R13,4(,R10)
+         ST    R10,8(,R13)
+         LR    R13,R10
+*
+         WTO   'ZBLAS DGER z390 test'
+*
+* ============================================================= *
+* TEST 1: basic, alpha=1, x=[1,2] y=[3,4] A=zeros               *
+* Expected A: [3, 6, 4, 8]                                       *
+* ============================================================= *
+*
+         WTO   'T1: basic a=1'
+         MVC   T1A(32),T1AINI
+         LA    R1,T1PL
+         L     R15,=A(DGER)
+         BALR  R14,R15
+         LD    0,T1A
+         CDB   0,T1E1
+         BE    T1P1
+         WTO   'FAIL A11!=3'
+         B     T1C2
+T1P1     WTO   'PASS A11=3'
+T1C2     DS    0H
+         LD    0,T1A+8
+         CDB   0,T1E2
+         BE    T1P2
+         WTO   'FAIL A21!=6'
+         B     T1C3
+T1P2     WTO   'PASS A21=6'
+T1C3     DS    0H
+         LD    0,T1A+16
+         CDB   0,T1E3
+         BE    T1P3
+         WTO   'FAIL A12!=4'
+         B     T1C4
+T1P3     WTO   'PASS A12=4'
+T1C4     DS    0H
+         LD    0,T1A+24
+         CDB   0,T1E4
+         BE    T1P4
+         WTO   'FAIL A22!=8'
+         B     TST2
+T1P4     WTO   'PASS A22=8'
+*
+* ============================================================= *
+* TEST 2: accumulate, alpha=2, x=[1,2] y=[1,1] A=[1,2,3,4]      *
+* Expected A: [3, 6, 5, 8]                                       *
+* ============================================================= *
+*
+TST2     DS    0H
+         WTO   'T2: accum a=2'
+         MVC   T2A(32),T2AINI
+         LA    R1,T2PL
+         L     R15,=A(DGER)
+         BALR  R14,R15
+         LD    0,T2A
+         CDB   0,T2E1
+         BE    T2P1
+         WTO   'FAIL A11!=3'
+         B     T2C2
+T2P1     WTO   'PASS A11=3'
+T2C2     DS    0H
+         LD    0,T2A+8
+         CDB   0,T2E2
+         BE    T2P2
+         WTO   'FAIL A21!=6'
+         B     T2C3
+T2P2     WTO   'PASS A21=6'
+T2C3     DS    0H
+         LD    0,T2A+16
+         CDB   0,T2E3
+         BE    T2P3
+         WTO   'FAIL A12!=5'
+         B     T2C4
+T2P3     WTO   'PASS A12=5'
+T2C4     DS    0H
+         LD    0,T2A+24
+         CDB   0,T2E4
+         BE    T2P4
+         WTO   'FAIL A22!=8'
+         B     TST3
+T2P4     WTO   'PASS A22=8'
+*
+* ============================================================= *
+* TEST 3: alpha=0, A unchanged                                    *
+* Expected A: [1, 2, 3, 4]                                       *
+* ============================================================= *
+*
+TST3     DS    0H
+         WTO   'T3: alpha=0'
+         MVC   T3A(32),T3AINI
+         LA    R1,T3PL
+         L     R15,=A(DGER)
+         BALR  R14,R15
+         LD    0,T3A
+         CDB   0,T3E1
+         BE    T3P1
+         WTO   'FAIL A11!=1'
+         B     T3C2
+T3P1     WTO   'PASS A11=1'
+T3C2     DS    0H
+         LD    0,T3A+8
+         CDB   0,T3E2
+         BE    T3P2
+         WTO   'FAIL A21!=2'
+         B     TST4
+T3P2     WTO   'PASS A21=2'
+*
+* ============================================================= *
+* TEST 4: M=0, quick return (no crash)                            *
+* ============================================================= *
+*
+TST4     DS    0H
+         WTO   'T4: M=0'
+         LA    R1,T4PL
+         L     R15,=A(DGER)
+         BALR  R14,R15
+         WTO   'PASS M=0'
+*
+* ---- DONE ----
+*
+         WTO   'DGER: ALL TESTS DONE'
+         L     R13,4(,R13)
+         LM    R14,R12,12(R13)
+         SR    R15,R15
+         BR    R14
+*
+* ---- Test data ----
+*
+TSAVE    DS    18F
+*
+* ---- Common data (BFP hex) ----
+*
+         DS    0D
+* X = [1, 2]
+COMX     DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+*
+* ---- Test 1: basic, alpha=1, y=[3,4], A=zeros ----
+*
+         DS    0D
+T1M      DC    F'2'
+T1N      DC    F'2'
+         DS    0D
+T1ALP    DC    X'3FF0000000000000'         1.0
+T1IX     DC    F'1'
+T1Y      DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+T1IY     DC    F'1'
+         DS    0D
+T1A      DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DC    X'0000000000000000'
+T1LDA    DC    F'2'
+T1AINI   DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DS    0D
+T1E1     DC    X'4008000000000000'         3.0
+T1E2     DC    X'4018000000000000'         6.0
+T1E3     DC    X'4010000000000000'         4.0
+T1E4     DC    X'4020000000000000'         8.0
+T1PL     DC    A(T1M,T1N,T1ALP,COMX,T1IX,T1Y,T1IY,T1A)
+         DC    X'80',AL3(T1LDA)
+*
+* ---- Test 2: accumulate, alpha=2, y=[1,1], A=[1,2,3,4] ----
+*
+         DS    0D
+T2M      DC    F'2'
+T2N      DC    F'2'
+         DS    0D
+T2ALP    DC    X'4000000000000000'         2.0
+T2IX     DC    F'1'
+T2Y      DC    X'3FF0000000000000'         1.0
+         DC    X'3FF0000000000000'         1.0
+T2IY     DC    F'1'
+         DS    0D
+T2A      DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+T2LDA    DC    F'2'
+T2AINI   DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+         DS    0D
+T2E1     DC    X'4008000000000000'         3.0
+T2E2     DC    X'4018000000000000'         6.0
+T2E3     DC    X'4014000000000000'         5.0
+T2E4     DC    X'4020000000000000'         8.0
+T2PL     DC    A(T2M,T2N,T2ALP,COMX,T2IX,T2Y,T2IY,T2A)
+         DC    X'80',AL3(T2LDA)
+*
+* ---- Test 3: alpha=0, A=[1,2,3,4] unchanged ----
+*
+         DS    0D
+T3M      DC    F'2'
+T3N      DC    F'2'
+         DS    0D
+T3ALP    DC    X'0000000000000000'         0.0
+T3IX     DC    F'1'
+T3Y      DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+T3IY     DC    F'1'
+         DS    0D
+T3A      DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+T3LDA    DC    F'2'
+T3AINI   DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+         DS    0D
+T3E1     DC    X'3FF0000000000000'         1.0
+T3E2     DC    X'4000000000000000'         2.0
+T3PL     DC    A(T3M,T3N,T3ALP,COMX,T3IX,T3Y,T3IY,T3A)
+         DC    X'80',AL3(T3LDA)
+*
+* ---- Test 4: M=0 (quick return) ----
+*
+         DS    0D
+T4M      DC    F'0'
+T4N      DC    F'2'
+         DS    0D
+T4ALP    DC    X'3FF0000000000000'         1.0
+T4IX     DC    F'1'
+T4Y      DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+T4IY     DC    F'1'
+T4A      DC    X'3FF0000000000000'
+T4LDA    DC    F'2'
+T4PL     DC    A(T4M,T4N,T4ALP,COMX,T4IX,T4Y,T4IY,T4A)
+         DC    X'80',AL3(T4LDA)
+*
+         LTORG
+         DROP  R12
+*
+* ============================================================= *
+* DGER - scalar only (no VF, no STFLE, z390 safe)                *
+* A := alpha * x * y' + A                                         *
+*                                                                 *
+* 9 parms via OS linkage. No transpose. No beta. Bliss.           *
+* ============================================================= *
+*
+DGER     CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING DGER,R12
+         LR    R11,R1
+*
+* ---- Extract parameters ----
+*
+         L     R1,0(,R11)
+         L     R1,0(,R1)
+         ST    R1,DGR@M
+         L     R1,4(,R11)
+         L     R1,0(,R1)
+         ST    R1,DGR@N
+*
+         L     R1,8(,R11)
+         LD    0,0(,R1)
+         STD   0,DGR@ALP
+*
+         L     R1,12(,R11)
+         ST    R1,DGR@XB
+         L     R1,16(,R11)
+         L     R1,0(,R1)
+         ST    R1,DGR@IX
+*
+         L     R1,20(,R11)
+         ST    R1,DGR@YB
+         L     R1,24(,R11)
+         L     R1,0(,R1)
+         ST    R1,DGR@IY
+*
+         L     R1,28(,R11)
+         ST    R1,DGR@AB
+         L     R1,32(,R11)
+         N     R1,=X'7FFFFFFF'
+         L     R1,0(,R1)
+         ST    R1,DGR@LDA
+*
+* ---- Quick return: M <= 0 or N <= 0 ----
+*
+         L     R0,DGR@M
+         LTR   R0,R0
+         BNP   DGR@RT
+         L     R0,DGR@N
+         LTR   R0,R0
+         BNP   DGR@RT
+*
+* ---- Alpha == 0? Go home ----
+*
+         LD    0,DGR@ALP
+         LTDBR 0,0
+         BZ    DGR@RT
+*
+* ---- Compute byte strides ----
+*
+         L     R8,DGR@LDA
+         SLA   R8,3
+         L     R9,DGR@IX
+         SLA   R9,3
+         L     R10,DGR@IY
+         SLA   R10,3
+*
+* ---- Adjust bases for negative strides ----
+*
+         LTR   R9,R9
+         BNM   DGR@AY
+         L     R3,DGR@M
+         BCTR  R3,0
+         MSR   R3,R9
+         LCR   R3,R3
+         L     R7,DGR@XB
+         AR    R7,R3
+         ST    R7,DGR@XB
+DGR@AY   DS    0H
+         LTR   R10,R10
+         BNM   DGR@GO
+         L     R3,DGR@N
+         BCTR  R3,0
+         MSR   R3,R10
+         LCR   R3,R3
+         L     R7,DGR@YB
+         AR    R7,R3
+         ST    R7,DGR@YB
+*
+* ---- Main loop ----
+*
+DGR@GO   DS    0H
+         L     R5,DGR@AB
+         L     R7,DGR@YB
+         L     R3,DGR@XB
+         L     R2,DGR@N
+*
+DGR@JL   DS    0H
+         LD    2,0(,R7)
+         LTDBR 2,2
+         BZ    DGR@JN
+         LD    0,DGR@ALP
+         MDBR  2,0
+         LR    R11,R3
+         LR    R6,R5
+         L     R4,DGR@M
+DGR@IL   DS    0H
+         LD    6,0(,R11)
+         MDBR  6,2
+         ADB   6,0(,R6)
+         STD   6,0(,R6)
+         LA    R6,8(,R6)
+         AR    R11,R9
+         BCT   R4,DGR@IL
+*
+DGR@JN   DS    0H
+         AR    R5,R8
+         AR    R7,R10
+         BCT   R2,DGR@JL
+*
+DGR@RT   DS    0H
+         LM    R14,R12,12(R13)
+         BR    R14
+*
+* ---- Local storage ----
+*
+         DS    0D
+DGR@M    DS    F
+DGR@N    DS    F
+DGR@LDA  DS    F
+DGR@IX   DS    F
+DGR@IY   DS    F
+         DS    0D
+DGR@ALP  DS    D
+DGR@AB   DS    F
+DGR@XB   DS    F
+DGR@YB   DS    F
+         LTORG
+         END   TSTDGER

@@ -1,0 +1,16 @@
+# z390 build artifacts
+*.390
+*.BAL
+*.PRN
+*.OBJ
+*.LST
+*.LOG
+*.ERR
+*.STA
+*.TR*
+
+# Compiled Fortran
+*.exe
+
+# Stale top-level artifacts
+test$test.*

@@ -1,0 +1,167 @@
+*---------------------------------------------------------------------*
+* DGER - Double-precision GEneral Rank-1 update                       *
+*                                                                     *
+* A := alpha * x * y' + A                                              *
+*   Column-major: A(i,j) at A + j*LDA*8 + i*8                        *
+*                                                                     *
+* OS linkage (R1 -> addr list, 9 parms):                              *
+*   +0  M (F)     +4  N (F)     +8  ALPHA (D)                        *
+*  +12  X (array) +16  INCX (F) +20  Y (array)                       *
+*  +24  INCY (F)  +28  A (array) +32 LDA (F, 0x80)                   *
+*                                                                     *
+* Scalar only. Not reentrant.                                         *
+* The simplest Level 2 routine. Like DAXPY had a baby with a matrix.  *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DGER
+*
+* ---- Extract parameters ----
+* Nine parms. The committee showed restraint for once.
+*
+         LR    R11,R1                      Parm list base
+*
+         L     R1,0(,R11)                  Addr of M
+         L     R1,0(,R1)
+         ST    R1,DGR@M                   M
+         L     R1,4(,R11)                  Addr of N
+         L     R1,0(,R1)
+         ST    R1,DGR@N                   N
+*
+         L     R1,8(,R11)                  Addr of ALPHA
+         LD    FPR0,0(,R1)                alpha -> FPR0
+         STD   FPR0,DGR@ALP               Save alpha
+*
+         L     R1,12(,R11)                 X base address
+         ST    R1,DGR@XB
+         L     R1,16(,R11)                 Addr of INCX
+         L     R1,0(,R1)
+         ST    R1,DGR@IX
+*
+         L     R1,20(,R11)                 Y base address
+         ST    R1,DGR@YB
+         L     R1,24(,R11)                 Addr of INCY
+         L     R1,0(,R1)
+         ST    R1,DGR@IY
+*
+         L     R1,28(,R11)                 A base address
+         ST    R1,DGR@AB
+         L     R1,32(,R11)                 Addr of LDA (high bit)
+         N     R1,=X'7FFFFFFF'             Mask off high bit
+         L     R1,0(,R1)
+         ST    R1,DGR@LDA
+*
+* ---- Quick return: M <= 0 or N <= 0 ----
+*
+         L     R0,DGR@M
+         LTR   R0,R0
+         BNP   DGR@RT
+         L     R0,DGR@N
+         LTR   R0,R0
+         BNP   DGR@RT
+*
+* ---- Alpha == 0? Nothing to do ----
+* No beta to worry about. Just pack up and go home.
+*
+         LD    FPR0,DGR@ALP
+         LTDBR FPR0,FPR0
+         BZ    DGR@RT
+*
+* ---- Compute byte strides ----
+*
+         L     R8,DGR@LDA
+         SLA   R8,3                        LDA * 8
+         L     R9,DGR@IX
+         SLA   R9,3                        INCX * 8 (signed)
+         L     R10,DGR@IY
+         SLA   R10,3                       INCY * 8 (signed)
+*
+* ---- Adjust bases for negative strides ----
+* x adjusts over M, y adjusts over N. The usual backstep waltz.
+*
+         LTR   R9,R9
+         BNM   DGR@AY
+         L     R3,DGR@M                   lenx = M
+         BCTR  R3,0                        M - 1
+         MSR   R3,R9                       (M-1)*INCX*8 (neg)
+         LCR   R3,R3                       positive offset
+         L     R7,DGR@XB
+         AR    R7,R3
+         ST    R7,DGR@XB
+DGR@AY   DS    0H
+         LTR   R10,R10
+         BNM   DGR@GO
+         L     R3,DGR@N                   leny = N
+         BCTR  R3,0                        N - 1
+         MSR   R3,R10                      (N-1)*INCY*8 (neg)
+         LCR   R3,R3                       positive offset
+         L     R7,DGR@YB
+         AR    R7,R3
+         ST    R7,DGR@YB
+*
+* ============================================================= *
+* MAIN LOOP: the rank-1 outer product                             *
+*                                                                 *
+* for j=0..N-1:                                                   *
+*   if y(jy) != 0:                                                *
+*     temp = alpha * y(jy)                                         *
+*     for i=0..M-1:                                                *
+*       A(i,j) += temp * x(ix)                                    *
+*   jy += INCY, A_col += LDA*8                                    *
+*                                                                 *
+* R2=j, R3=x base (saved), R5=A col, R7=y ptr                    *
+* R4=i, R6=A row, R11=x inner ptr                                 *
+* R8=LDA*8, R9=INCX*8, R10=INCY*8                                *
+* FPR0=alpha, FPR2=temp, FPR6=scratch                              *
+* ============================================================= *
+*
+DGR@GO   DS    0H
+         L     R5,DGR@AB                  A col ptr
+         L     R7,DGR@YB                  y ptr
+         L     R3,DGR@XB                  x base (saved)
+         L     R2,DGR@N                   j counter
+*
+DGR@JL   DS    0H                          ---- J loop ----
+         LD    FPR2,0(,R7)                y(jy)
+         LTDBR FPR2,FPR2                  y(jy) == 0?
+         BZ    DGR@JN                     skip column if zero
+         MDBR  FPR2,FPR0                  temp = alpha * y(jy)
+         LR    R11,R3                     x ptr = x base
+         LR    R6,R5                      A ptr = A col start
+         L     R4,DGR@M                   i counter
+DGR@IL   DS    0H                          ---- I loop ----
+         LD    FPR6,0(,R11)               x(ix)
+         MDBR  FPR6,FPR2                  temp * x(ix)
+         ADB   FPR6,0(,R6)               + A(i,j)
+         STD   FPR6,0(,R6)               store A(i,j)
+         LA    R6,8(,R6)                  next A row
+         AR    R11,R9                     next x
+         BCT   R4,DGR@IL
+*
+DGR@JN   DS    0H                          ---- advance J ----
+         AR    R5,R8                      A col += LDA*8
+         AR    R7,R10                     y += INCY*8
+         BCT   R2,DGR@JL
+*
+DGR@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+DGR@M    DS    F                          M
+DGR@N    DS    F                          N
+DGR@LDA  DS    F                          LDA
+DGR@IX   DS    F                          INCX
+DGR@IY   DS    F                          INCY
+         DS    0D
+DGR@ALP  DS    D                          alpha
+DGR@AB   DS    F                          A base
+DGR@XB   DS    F                          X base
+DGR@YB   DS    F                          Y base
+*
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   DGER

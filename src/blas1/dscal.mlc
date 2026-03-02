@@ -1,0 +1,120 @@
+*---------------------------------------------------------------------*
+* DSCAL -- Double-precision SCALe                                     *
+*                                                                     *
+* Computes: X(i) = alpha * X(i)   for i = 1..N                       *
+*                                                                     *
+* OS linkage parm list (R1 -> address list):                          *
+*   +0  addr of N      (fullword integer)                             *
+*   +4  addr of DA     (float64 scalar, the alpha)                    *
+*   +8  addr of DX     (float64 array)                                *
+*  +12  addr of INCX   (fullword integer, high bit set -- last parm)  *
+*                                                                     *
+* Return: nothing (X modified in place). FPR0 clobbered.              *
+*                                                                     *
+* VF path broadcasts alpha and multiplies pairs.                      *
+* Scalar path does them one at a time, the honest way.                *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DSCAL
+*
+* ---- Load parameters ----
+*
+         LR    R11,R1                      Save parm list ptr
+         L     R2,0(,R11)                  Addr of N
+         L     R2,0(,R2)                   N
+         LTR   R2,R2                       N <= 0?
+         BNP   DSC@RT                      Nothing to do
+*
+         L     R3,4(,R11)                  Addr of DA
+         LD    FPR0,0(,R3)                 alpha -> FPR0
+*
+         L     R4,8(,R11)                  DX base address
+         L     R5,12(,R11)                 Addr of INCX
+         L     R5,0(,R5)                   INCX
+*
+* ---- Unit stride check ----
+*
+         CHI   R5,1                        INCX == 1?
+         BNE   DSC@SC                      Non-unit -> scalar
+*
+* ---- Probe for Vector Facility ----
+*
+         VFTEST R0
+         BZ    DSC@SU                      No VF -> scalar unit
+*
+* ============================================================= *
+* VECTOR PATH -- unit stride, 2 doubles/iter via VFM             *
+* ============================================================= *
+*
+         VREPG V0,V0,0                     Broadcast FPR0 -> V0
+         LR    R8,R2                       R8 = N
+         SRL   R8,1                        R8 = N / 2 (pairs)
+         LTR   R8,R8                       Any pairs?
+         BZ    DSC@VR                      None -> remainder
+*
+DSC@VL   DS    0H                          ---- Vector loop ----
+         VL    V1,0(,R4)                 Load X pair
+         VFM   V1,V0,V1,3,0               V1 = alpha * X
+         VST   V1,0(,R4)                Store X pair
+         LA    R4,16(,R4)                  X += 16
+         BCT   R8,DSC@VL
+*
+* ---- Vector remainder (N odd) ----
+*
+DSC@VR   DS    0H
+         TML   R2,X'0001'                 N odd?
+         BZ    DSC@RT                      Even -> done
+         LD    FPR2,0(,R4)                 Load last X
+         MDBR  FPR2,FPR0                   FPR2 = alpha * X
+         STD   FPR2,0(,R4)                 Store X
+         B     DSC@RT
+*
+* ============================================================= *
+* SCALAR PATH (unit stride)                                      *
+* ============================================================= *
+*
+DSC@SU   DS    0H
+         LA    R5,8                        Byte stride = 8
+         B     DSC@SL
+*
+* ============================================================= *
+* SCALAR PATH (general) -- any stride including negative         *
+* ============================================================= *
+*
+DSC@SC   DS    0H
+         SLA   R5,3                        INCX * 8 -> byte stride
+*
+* ---- Adjust base for negative INCX ----
+         LTR   R5,R5
+         BNM   DSC@SL                      Non-negative -> skip
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R5
+         LCR   R0,R0
+         AR    R4,R0
+*
+DSC@SL   DS    0H                          ---- Scalar loop ----
+         LR    R8,R2
+*
+DSC@S1   DS    0H
+         LD    FPR2,0(,R4)                 FPR2 = X(i)
+         MDBR  FPR2,FPR0                   FPR2 = alpha * X(i)
+         STD   FPR2,0(,R4)                 X(i) = result
+         AR    R4,R5                       X += stride
+         BCT   R8,DSC@S1
+*
+* ============================================================= *
+* RETURN                                                         *
+* ============================================================= *
+*
+DSC@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+ZB@STFL  DS    3D                          24 bytes for STFLE
+*
+         END   DSCAL

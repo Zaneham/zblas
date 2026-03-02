@@ -1,0 +1,163 @@
+*---------------------------------------------------------------------*
+* Z390_IDAMAX - Self-contained z390 test for IDAMAX scalar path.     *
+* Two CSECTs, OS linkage. Returns 1-based index in R0.                *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+TSTIDMAX CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING TSTIDMAX,R12
+         LA    R10,TSAVE
+         ST    R13,4(,R10)
+         ST    R10,8(,R13)
+         LR    R13,R10
+*
+         WTO   'ZBLAS IDAMAX z390 test'
+*
+* ---- TEST 1: X=[1,-5,3] -> index 2 ----
+*
+         WTO   'T1: max abs [1,-5,3]=idx2'
+         LA    R1,T1PL
+         L     R15,=A(IDAMAX)
+         BALR  R14,R15
+* R0 has result
+         CHI   R0,2
+         BE    T1P1
+         WTO   'FAIL idx!=2'
+         B     TST2
+T1P1     WTO   'PASS idx=2'
+*
+* ---- TEST 2: N=0 -> R0=0 ----
+*
+TST2     DS    0H
+         WTO   'T2: N=0'
+         LA    R1,T2PL
+         L     R15,=A(IDAMAX)
+         BALR  R14,R15
+         LTR   R0,R0
+         BZ    T2P1
+         WTO   'FAIL N=0 idx!=0'
+         B     TST3
+T2P1     WTO   'PASS N=0 idx=0'
+*
+* ---- TEST 3: N=1 -> R0=1 ----
+*
+TST3     DS    0H
+         WTO   'T3: N=1'
+         LA    R1,T3PL
+         L     R15,=A(IDAMAX)
+         BALR  R14,R15
+         CHI   R0,1
+         BE    T3P1
+         WTO   'FAIL N=1 idx!=1'
+         B     DONE
+T3P1     WTO   'PASS N=1 idx=1'
+*
+DONE     DS    0H
+         WTO   'IDAMAX: ALL TESTS DONE'
+         L     R13,4(,R13)
+         LM    R14,R12,12(R13)
+         SR    R15,R15
+         BR    R14
+*
+* ---- Test data ----
+*
+TSAVE    DS    18F
+         DS    0D
+* Test 1: X=[1,-5,3]
+T1N      DC    F'3'
+         DS    0D
+T1X      DC    X'3FF0000000000000'         BFP 1.0
+         DC    X'C014000000000000'         BFP -5.0
+         DC    X'4008000000000000'         BFP 3.0
+T1IX     DC    F'1'
+T1PL     DC    A(T1N,T1X)
+         DC    X'80',AL3(T1IX)
+*
+* Test 2: N=0
+         DS    0D
+T2N      DC    F'0'
+         DS    0D
+T2X      DC    X'3FF0000000000000'
+T2IX     DC    F'1'
+T2PL     DC    A(T2N,T2X)
+         DC    X'80',AL3(T2IX)
+*
+* Test 3: N=1
+         DS    0D
+T3N      DC    F'1'
+         DS    0D
+T3X      DC    X'4008000000000000'         BFP 3.0
+T3IX     DC    F'1'
+T3PL     DC    A(T3N,T3X)
+         DC    X'80',AL3(T3IX)
+         LTORG
+         DROP  R12
+*
+* ---- IDAMAX: returns 1-based index of max |X(i)| in R0 ----
+*
+IDAMAX   CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING IDAMAX,R12
+         LR    R11,R1
+         SR    R0,R0                       Default = 0
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   IDX@RT
+         L     R4,4(,R11)                  DX
+         L     R5,8(,R11)
+         L     R5,0(,R5)                   INCX
+         LA    R0,1                        Default = 1
+         CHI   R2,1
+         BE    IDX@RT
+         SLA   R5,3
+         LTR   R5,R5
+         BNM   IDX@GO
+         LR    R3,R2
+         BCTR  R3,0
+         MSR   R3,R5
+         LCR   R3,R3
+         AR    R4,R3
+IDX@GO   DS    0H
+         LD    0,0(,R4)
+         LPDBR 0,0
+         LA    R9,1
+         AR    R4,R5
+         LR    R8,R2
+         BCTR  R8,0
+IDX@S1   DS    0H
+         LA    R9,1(,R9)
+         LD    2,0(,R4)
+         LPDBR 2,2
+         CDBR  2,0
+         BNH   IDX@NX
+         LDR   0,2
+         LR    R0,R9
+IDX@NX   DS    0H
+         AR    R4,R5
+         BCT   R8,IDX@S1
+IDX@RT   DS    0H
+         ST    R0,0(,R13)                  Stash result at SA+0
+         LM    R14,R12,12(R13)             Restore regs (clobbers R0)
+         L     R0,0(,R13)                  R13 unchanged by LM
+         BR    R14
+         LTORG
+         END   TSTIDMAX

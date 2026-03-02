@@ -1,0 +1,135 @@
+*---------------------------------------------------------------------*
+* DSWAP -- Double-precision vector SWAP                               *
+*                                                                     *
+* Swaps: X(i) <-> Y(i)   for i = 1..N                                *
+*                                                                     *
+* OS linkage parm list (R1 -> address list):                          *
+*   +0  addr of N      (fullword integer)                             *
+*   +4  addr of DX     (float64 array)                                *
+*   +8  addr of INCX   (fullword integer)                             *
+*  +12  addr of DY     (float64 array)                                *
+*  +16  addr of INCY   (fullword integer, high bit set -- last parm)  *
+*                                                                     *
+* Return: nothing (X and Y swapped in place).                         *
+*                                                                     *
+* The ballroom dance of numerical computing.                          *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DSWAP
+*
+* ---- Load parameters ----
+*
+         LR    R11,R1
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   DSW@RT
+*
+         L     R4,4(,R11)                  DX base
+         L     R5,8(,R11)                  Addr of INCX
+         L     R5,0(,R5)                   INCX
+         L     R6,12(,R11)                 DY base
+         L     R7,16(,R11)                 Addr of INCY
+         L     R7,0(,R7)                   INCY
+*
+* ---- Unit stride check ----
+*
+         CHI   R5,1
+         BNE   DSW@SC
+         CHI   R7,1
+         BNE   DSW@SC
+*
+* ---- Probe for Vector Facility ----
+*
+         VFTEST R0
+         BZ    DSW@SU
+*
+* ============================================================= *
+* VECTOR PATH -- unit stride, swap 2 doubles per iteration       *
+* V1 = X pair, V2 = Y pair, then cross-store.                   *
+* ============================================================= *
+*
+         LR    R8,R2
+         SRL   R8,1
+         LTR   R8,R8
+         BZ    DSW@VR
+*
+DSW@VL   DS    0H
+         VL    V1,0(,R4)                 Load X pair
+         VL    V2,0(,R6)                 Load Y pair
+         VST   V2,0(,R4)                Store Y -> X
+         VST   V1,0(,R6)                Store X -> Y
+         LA    R4,16(,R4)
+         LA    R6,16(,R6)
+         BCT   R8,DSW@VL
+*
+DSW@VR   DS    0H
+         TML   R2,X'0001'
+         BZ    DSW@RT
+         LD    FPR0,0(,R4)
+         LD    FPR2,0(,R6)
+         STD   FPR2,0(,R4)
+         STD   FPR0,0(,R6)
+         B     DSW@RT
+*
+* ============================================================= *
+* SCALAR PATH (unit stride)                                      *
+* ============================================================= *
+*
+DSW@SU   DS    0H
+         LA    R5,8
+         LA    R7,8
+         B     DSW@SL
+*
+* ============================================================= *
+* SCALAR PATH (general)                                          *
+* ============================================================= *
+*
+DSW@SC   DS    0H
+         SLA   R5,3
+         SLA   R7,3
+*
+         LTR   R5,R5
+         BNM   DSW@AY
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R5
+         LCR   R0,R0
+         AR    R4,R0
+*
+DSW@AY   DS    0H
+         LTR   R7,R7
+         BNM   DSW@SL
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R7
+         LCR   R0,R0
+         AR    R6,R0
+*
+DSW@SL   DS    0H
+         LR    R8,R2
+*
+DSW@S1   DS    0H
+         LD    FPR0,0(,R4)                 temp = X(i)
+         LD    FPR2,0(,R6)                 FPR2 = Y(i)
+         STD   FPR2,0(,R4)                 X(i) = Y(i)
+         STD   FPR0,0(,R6)                 Y(i) = temp
+         AR    R4,R5
+         AR    R6,R7
+         BCT   R8,DSW@S1
+*
+* ============================================================= *
+* RETURN                                                         *
+* ============================================================= *
+*
+DSW@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   DSWAP

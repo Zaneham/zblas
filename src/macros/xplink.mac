@@ -1,0 +1,49 @@
+.*
+.* zblas — xplink.mac
+.* XPLINK entry/exit for Language Environment (z/OS 1.2+).
+.*
+.* XPLINK calling convention:
+.*   R4  = DSA pointer (stack, not R13)
+.*   R7  = return address (not R14)
+.*   Parms: R1-R3 (ptrs), FPR0/2/4/6 (floats)
+.*   Return: R3 (int) or FPR0 (float)
+.*   Callee saves R8-R15 if clobbered
+.*
+.* Usage:
+.*   XPENTR &NAME
+.*   ... body ...
+.*   XPXIT
+.*
+.* Because sometimes 1960s linkage isn't enterprise enough.
+.*
+         MACRO
+&LBL     XPENTR &NAME,&DSASZ=256
+&LBL     CSECT
+&NAME    DS    0D
+.*
+.* XPLINK function descriptor
+.*
+         DC    A(XPB@&NAME)                Entry point address
+         DC    A(0)                        Reserved
+         DC    AL2(0)                      Flags
+         DC    AL2(&DSASZ)                 DSA size
+XPB@&NAME DS   0H
+.*
+.* Prologue: save callee-saved, allocate frame
+.*
+         STM   R8,R15,128(R4)              Save callee-saved regs
+         LR    R8,R4                       Remember caller DSA
+         AHI   R4,-&DSASZ                  Allocate our frame
+         ST    R8,0(,R4)                   Back-chain pointer
+         LR    R12,R15                     Base register
+         USING &NAME,R12
+         MEND
+.*
+.*-------------------------------------------------------------------*
+         MACRO
+&LBL     XPXIT
+&LBL     DS    0H
+         L     R4,0(,R4)                   Restore caller DSA
+         LM    R8,R15,128(R4)              Restore callee-saved
+         BR    R7                          Return via R7
+         MEND

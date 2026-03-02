@@ -1,0 +1,1038 @@
+*---------------------------------------------------------------------*
+* Z390_DTRSM - Self-contained z390 test for DTRSM scalar path.       *
+* Two CSECTs: test harness + scalar DTRSM. No VF, no STFLE.          *
+* All doubles are IEEE 754 BFP (DC X'...'). 2x2 matrices.            *
+*                                                                     *
+* Solves op(A)*X = alpha*B (SIDE='L'). B overwritten in place.       *
+* Eight structural cases. The Fortran was bad enough.                *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+* ---- TEST HARNESS ----
+*
+TSTDTRSM CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING TSTDTRSM,R12
+         LA    R10,TSAVE
+         ST    R13,4(,R10)
+         ST    R10,8(,R13)
+         LR    R13,R10
+*
+         WTO   'ZBLAS DTRSM z390 test'
+*
+* ============================================================= *
+* TEST 1: Left, Upper, NoTrans, non-unit, alpha=1                *
+* A=[1,0,3,2] col-major upper: {{1,3},{0,2}}                     *
+* B=[7,4,13,6] col-major 2x2.                                    *
+* Col 0: x2=4/2=2, x1=(7-3*2)/1=1.                               *
+* Col 1: x2=6/2=3, x1=(13-3*3)/1=4.                              *
+* Expected B: [1,2,4,3]                                           *
+* ============================================================= *
+*
+         WTO   'T1: L,U,N,nonunit'
+         MVC   T1B(32),T1BINI
+         LA    R1,T1PL
+         L     R15,=A(DTRSM)
+         BALR  R14,R15
+         LD    0,T1B
+         CDB   0,T1E1
+         BE    T1P1
+         WTO   'FAIL B11!=1'
+         B     T1C2
+T1P1     WTO   'PASS B11=1'
+T1C2     DS    0H
+         LD    0,T1B+8
+         CDB   0,T1E2
+         BE    T1P2
+         WTO   'FAIL B21!=2'
+         B     T1C3
+T1P2     WTO   'PASS B21=2'
+T1C3     DS    0H
+         LD    0,T1B+16
+         CDB   0,T1E3
+         BE    T1P3
+         WTO   'FAIL B12!=4'
+         B     T1C4
+T1P3     WTO   'PASS B12=4'
+T1C4     DS    0H
+         LD    0,T1B+24
+         CDB   0,T1E4
+         BE    T1P4
+         WTO   'FAIL B22!=3'
+         B     TST2
+T1P4     WTO   'PASS B22=3'
+*
+* ============================================================= *
+* TEST 2: Left, Lower, NoTrans, non-unit, alpha=1                *
+* A=[1,2,0,3] col-major lower: {{1,0},{2,3}}                     *
+* B=[3,12,5,16] col-major 2x2.                                   *
+* Col 0: x1=3/1=3, x2=(12-2*3)/3=2.                              *
+* Col 1: x1=5/1=5, x2=(16-2*5)/3=2.                              *
+* Expected B: [3,2,5,2]                                           *
+* ============================================================= *
+*
+TST2     DS    0H
+         WTO   'T2: L,L,N,nonunit'
+         MVC   T2B(32),T2BINI
+         LA    R1,T2PL
+         L     R15,=A(DTRSM)
+         BALR  R14,R15
+         LD    0,T2B
+         CDB   0,T2E1
+         BE    T2P1
+         WTO   'FAIL B11!=3'
+         B     T2K2
+T2P1     WTO   'PASS B11=3'
+T2K2     DS    0H
+         LD    0,T2B+8
+         CDB   0,T2E2
+         BE    T2P2
+         WTO   'FAIL B21!=2'
+         B     T2K3
+T2P2     WTO   'PASS B21=2'
+T2K3     DS    0H
+         LD    0,T2B+16
+         CDB   0,T2E3
+         BE    T2P3
+         WTO   'FAIL B12!=5'
+         B     T2K4
+T2P3     WTO   'PASS B12=5'
+T2K4     DS    0H
+         LD    0,T2B+24
+         CDB   0,T2E4
+         BE    T2P4
+         WTO   'FAIL B22!=2'
+         B     TST3
+T2P4     WTO   'PASS B22=2'
+*
+* ============================================================= *
+* TEST 3: alpha=0, B should be zeroed                            *
+* Expected B: [0,0,0,0]                                           *
+* ============================================================= *
+*
+TST3     DS    0H
+         WTO   'T3: a=0'
+         MVC   T3B(32),T3BINI
+         LA    R1,T3PL
+         L     R15,=A(DTRSM)
+         BALR  R14,R15
+         LD    0,T3B
+         CDB   0,T3E1
+         BE    T3P1
+         WTO   'FAIL B11!=0'
+         B     T3K2
+T3P1     WTO   'PASS B11=0'
+T3K2     DS    0H
+         LD    0,T3B+8
+         CDB   0,T3E1
+         BE    T3P2
+         WTO   'FAIL B21!=0'
+         B     T3K3
+T3P2     WTO   'PASS B21=0'
+T3K3     DS    0H
+         LD    0,T3B+16
+         CDB   0,T3E1
+         BE    T3P3
+         WTO   'FAIL B12!=0'
+         B     T3K4
+T3P3     WTO   'PASS B12=0'
+T3K4     DS    0H
+         LD    0,T3B+24
+         CDB   0,T3E1
+         BE    T3P4
+         WTO   'FAIL B22!=0'
+         B     TST4
+T3P4     WTO   'PASS B22=0'
+*
+* ============================================================= *
+* TEST 4: M=0, quick return (no crash)                           *
+* ============================================================= *
+*
+TST4     DS    0H
+         WTO   'T4: M=0'
+         LA    R1,T4PL
+         L     R15,=A(DTRSM)
+         BALR  R14,R15
+         WTO   'PASS M=0'
+*
+* ---- DONE ----
+*
+         WTO   'DTRSM: ALL TESTS DONE'
+         L     R13,4(,R13)
+         LM    R14,R12,12(R13)
+         SR    R15,R15
+         BR    R14
+*
+* ---- Test data ----
+*
+TSAVE    DS    18F
+*
+* ---- Test 1: Left, Upper, N, non-unit, alpha=1 ----
+* A=[1,0,3,2] upper
+*
+         DS    0D
+T1SD     DC    X'D3'                       'L' (left)
+T1UP     DC    X'E4'                       'U'
+T1TR     DC    X'D5'                       'N'
+T1DG     DC    X'D5'                       'N' (non-unit)
+         DS    0F
+T1M      DC    F'2'
+T1N      DC    F'2'
+         DS    0D
+T1ALP    DC    X'3FF0000000000000'         1.0
+T1A      DC    X'3FF0000000000000'         1.0
+         DC    X'0000000000000000'         0.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4000000000000000'         2.0
+T1LDA    DC    F'2'
+T1B      DC    X'401C000000000000'         7.0
+         DC    X'4010000000000000'         4.0
+         DC    X'402A000000000000'         13.0
+         DC    X'4018000000000000'         6.0
+T1LDB    DC    F'2'
+T1BINI   DC    X'401C000000000000'         7.0
+         DC    X'4010000000000000'         4.0
+         DC    X'402A000000000000'         13.0
+         DC    X'4018000000000000'         6.0
+         DS    0D
+T1E1     DC    X'3FF0000000000000'         1.0
+T1E2     DC    X'4000000000000000'         2.0
+T1E3     DC    X'4010000000000000'         4.0
+T1E4     DC    X'4008000000000000'         3.0
+T1PL     DC    A(T1SD,T1UP,T1TR,T1DG,T1M,T1N,T1ALP,T1A,T1LDA)
+         DC    A(T1B)
+         DC    X'80',AL3(T1LDB)
+*
+* ---- Test 2: Left, Lower, N, non-unit, alpha=1 ----
+* A=[1,2,0,3] lower
+*
+         DS    0D
+T2SD     DC    X'D3'                       'L'
+T2UP     DC    X'D3'                       'L' (lower)
+T2TR     DC    X'D5'                       'N'
+T2DG     DC    X'D5'                       'N' (non-unit)
+         DS    0F
+T2M      DC    F'2'
+T2N      DC    F'2'
+         DS    0D
+T2ALP    DC    X'3FF0000000000000'         1.0
+T2A      DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'0000000000000000'         0.0
+         DC    X'4008000000000000'         3.0
+T2LDA    DC    F'2'
+T2B      DC    X'4008000000000000'         3.0
+         DC    X'4028000000000000'         12.0
+         DC    X'4014000000000000'         5.0
+         DC    X'4030000000000000'         16.0
+T2LDB    DC    F'2'
+T2BINI   DC    X'4008000000000000'         3.0
+         DC    X'4028000000000000'         12.0
+         DC    X'4014000000000000'         5.0
+         DC    X'4030000000000000'         16.0
+         DS    0D
+T2E1     DC    X'4008000000000000'         3.0
+T2E2     DC    X'4000000000000000'         2.0
+T2E3     DC    X'4014000000000000'         5.0
+T2E4     DC    X'4000000000000000'         2.0
+T2PL     DC    A(T2SD,T2UP,T2TR,T2DG,T2M,T2N,T2ALP,T2A,T2LDA)
+         DC    A(T2B)
+         DC    X'80',AL3(T2LDB)
+*
+* ---- Test 3: alpha=0, B zeroed ----
+*
+         DS    0D
+T3SD     DC    X'D3'
+T3UP     DC    X'E4'
+T3TR     DC    X'D5'
+T3DG     DC    X'D5'
+         DS    0F
+T3M      DC    F'2'
+T3N      DC    F'2'
+         DS    0D
+T3ALP    DC    X'0000000000000000'         0.0
+T3A      DC    X'3FF0000000000000'
+         DC    X'0000000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+T3LDA    DC    F'2'
+T3B      DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+T3LDB    DC    F'2'
+T3BINI   DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+         DS    0D
+T3E1     DC    X'0000000000000000'         0.0
+T3PL     DC    A(T3SD,T3UP,T3TR,T3DG,T3M,T3N,T3ALP,T3A,T3LDA)
+         DC    A(T3B)
+         DC    X'80',AL3(T3LDB)
+*
+* ---- Test 4: M=0 (quick return) ----
+*
+         DS    0D
+T4SD     DC    X'D3'
+T4UP     DC    X'E4'
+T4TR     DC    X'D5'
+T4DG     DC    X'D5'
+         DS    0F
+T4M      DC    F'0'
+T4N      DC    F'2'
+         DS    0D
+T4ALP    DC    X'3FF0000000000000'         1.0
+T4A      DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+T4LDA    DC    F'2'
+T4B      DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+T4LDB    DC    F'2'
+T4PL     DC    A(T4SD,T4UP,T4TR,T4DG,T4M,T4N,T4ALP,T4A,T4LDA)
+         DC    A(T4B)
+         DC    X'80',AL3(T4LDB)
+*
+         LTORG
+         DROP  R12
+*
+* ============================================================= *
+* DTRSM - scalar only (no VF, no STFLE, z390 safe)              *
+* Solves: op(A)*X = alpha*B (SIDE='L')                           *
+*     or  X*op(A) = alpha*B (SIDE='R')                           *
+*                                                                 *
+* 11 parms via OS linkage. All 8 cases.                           *
+* ============================================================= *
+*
+DTRSM    CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING DTRSM,R12
+         LR    R11,R1
+*
+* ---- Extract parameters ----
+*
+         L     R1,0(,R11)
+         MVC   DTM@SD(1),0(R1)
+         L     R1,4(,R11)
+         MVC   DTM@UP(1),0(R1)
+         L     R1,8(,R11)
+         MVC   DTM@TR(1),0(R1)
+         L     R1,12(,R11)
+         MVC   DTM@DG(1),0(R1)
+*
+         L     R1,16(,R11)
+         L     R1,0(,R1)
+         ST    R1,DTM@M
+         L     R1,20(,R11)
+         L     R1,0(,R1)
+         ST    R1,DTM@N
+*
+         L     R1,24(,R11)
+         LD    0,0(,R1)
+         STD   0,DTM@ALP
+*
+         L     R1,28(,R11)
+         ST    R1,DTM@AB
+         L     R1,32(,R11)
+         L     R1,0(,R1)
+         ST    R1,DTM@LDA
+*
+         L     R1,36(,R11)
+         ST    R1,DTM@BB
+         L     R1,40(,R11)
+         N     R1,=X'7FFFFFFF'
+         L     R1,0(,R1)
+         ST    R1,DTM@LDB
+*
+* ---- Quick return ----
+*
+         L     R0,DTM@M
+         LTR   R0,R0
+         BNP   DTM@RT
+         L     R0,DTM@N
+         LTR   R0,R0
+         BNP   DTM@RT
+*
+* ---- Byte strides ----
+*
+         L     R8,DTM@LDA
+         SLA   R8,3
+         L     R9,DTM@LDB
+         SLA   R9,3
+*
+* ---- Alpha == 0: zero B ----
+*
+         LD    0,DTM@ALP
+         LTDBR 0,0
+         BNZ   DTM@GO
+         L     R5,DTM@BB
+         L     R2,DTM@N
+         SDBR  2,2
+DTM@AZ   DS    0H
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@A1   DS    0H
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@A1
+         AR    R5,R9
+         BCT   R2,DTM@AZ
+         B     DTM@RT
+*
+* ---- Dispatch ----
+*
+DTM@GO   DS    0H
+         CLI   DTM@SD,X'D3'
+         BNE   DTM@RS
+         CLI   DTM@TR,X'D5'
+         BNE   DTM@LT
+         CLI   DTM@UP,X'E4'
+         BE    DTM@LU
+         B     DTM@LL
+DTM@LT   DS    0H
+         CLI   DTM@UP,X'E4'
+         BE    DTM@UT
+         B     DTM@LLT
+DTM@RS   DS    0H
+         CLI   DTM@TR,X'D5'
+         BNE   DTM@RT2
+         CLI   DTM@UP,X'E4'
+         BE    DTM@RU
+         B     DTM@RL
+DTM@RT2  DS    0H
+         CLI   DTM@UP,X'E4'
+         BE    DTM@RUT
+         B     DTM@RLT
+*
+* ---- LEFT / UPPER / NO-TRANS: back sub per B column ----
+*
+DTM@LU   DS    0H
+         L     R5,DTM@BB
+         L     R2,DTM@N
+*
+DTM@J1   DS    0H
+* Scale B(:,j) by alpha
+         LD    6,DTM@1
+         LD    0,DTM@ALP
+         CDBR  0,6
+         BE    DTM@S1
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@C1   DS    0H
+         LD    2,0(,R6)
+         MDBR  2,0
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@C1
+DTM@S1   DS    0H
+* K loop: k=M-1 downto 0
+         L     R6,DTM@AB
+         L     R0,DTM@M
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R6,R0                       A col M-1
+         LR    R4,R5
+         L     R0,DTM@M
+         BCTR  R0,0
+         SLA   R0,3
+         AR    R4,R0                       B(M-1,j)
+         L     R3,DTM@M
+*
+DTM@K1   DS    0H
+         LD    2,0(,R4)
+         LTDBR 2,2
+         BZ    DTM@N1
+* Divide by diagonal
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@D1
+         LR    R0,R3
+         BCTR  R0,0
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    6,0(,R11)
+         DDBR  2,6
+         STD   2,0(,R4)
+DTM@D1   DS    0H
+* Inner: B(i,j) -= B(k,j)*A(i,k) for i=0..k-1
+         LR    R15,R3
+         BCTR  R15,0
+         LTR   R15,R15
+         BZ    DTM@N1
+         LR    R7,R5
+         LR    R11,R6
+DTM@I1   DS    0H
+         LD    6,0(,R11)
+         MDBR  6,2
+         LD    4,0(,R7)
+         SDBR  4,6
+         STD   4,0(,R7)
+         LA    R11,8(,R11)
+         LA    R7,8(,R7)
+         BCT   R15,DTM@I1
+*
+DTM@N1   DS    0H
+         SR    R6,R8
+         L     R0,=F'8'
+         SR    R4,R0                       B(k,j) -= 8
+         BCT   R3,DTM@K1
+*
+         AR    R5,R9
+         BCT   R2,DTM@J1
+         B     DTM@RT
+*
+* ---- LEFT / LOWER / NO-TRANS: forward sub per B column ----
+*
+DTM@LL   DS    0H
+         L     R5,DTM@BB
+         L     R2,DTM@N
+*
+DTM@J2   DS    0H
+         LD    6,DTM@1
+         LD    0,DTM@ALP
+         CDBR  0,6
+         BE    DTM@S2
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@C2   DS    0H
+         LD    2,0(,R6)
+         MDBR  2,0
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@C2
+DTM@S2   DS    0H
+* K loop: k=0..M-1
+         L     R6,DTM@AB
+         LR    R4,R5
+         L     R3,DTM@M
+*
+DTM@K2   DS    0H
+         LD    2,0(,R4)
+         LTDBR 2,2
+         BZ    DTM@N2
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@D2
+         L     R0,DTM@M
+         SR    R0,R3
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    6,0(,R11)
+         DDBR  2,6
+         STD   2,0(,R4)
+DTM@D2   DS    0H
+* Inner: B(i,j) -= B(k,j)*A(i,k) for i=k+1..M-1
+         LR    R15,R3
+         BCTR  R15,0
+         LTR   R15,R15
+         BZ    DTM@N2
+         LR    R7,R4
+         LA    R7,8(,R7)
+         L     R0,DTM@M
+         SR    R0,R3
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LA    R11,8(,R11)
+DTM@I2   DS    0H
+         LD    6,0(,R11)
+         MDBR  6,2
+         LD    4,0(,R7)
+         SDBR  4,6
+         STD   4,0(,R7)
+         LA    R11,8(,R11)
+         LA    R7,8(,R7)
+         BCT   R15,DTM@I2
+*
+DTM@N2   DS    0H
+         AR    R6,R8
+         LA    R4,8(,R4)
+         BCT   R3,DTM@K2
+*
+         AR    R5,R9
+         BCT   R2,DTM@J2
+         B     DTM@RT
+*
+* ---- LEFT / UPPER / TRANS ----
+*
+DTM@UT   DS    0H
+         L     R5,DTM@BB
+         L     R2,DTM@N
+*
+DTM@J3   DS    0H
+         LR    R7,R5
+         L     R6,DTM@AB
+         L     R3,DTM@M
+*
+DTM@I3   DS    0H
+         LD    0,DTM@ALP
+         LD    2,0(,R7)
+         MDBR  2,0
+         L     R15,DTM@M
+         SR    R15,R3
+         LTR   R15,R15
+         BZ    DTM@P3
+         ST    R3,DTM@SL
+         LR    R11,R6
+         LR    R3,R5
+DTM@L3   DS    0H
+         LD    6,0(,R11)
+         MDB   6,0(,R3)
+         SDBR  2,6
+         LA    R11,8(,R11)
+         LA    R3,8(,R3)
+         BCT   R15,DTM@L3
+         L     R3,DTM@SL
+DTM@P3   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@Q3
+         L     R0,DTM@M
+         SR    R0,R3
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    6,0(,R11)
+         DDBR  2,6
+DTM@Q3   DS    0H
+         STD   2,0(,R7)
+         LA    R7,8(,R7)
+         AR    R6,R8
+         BCT   R3,DTM@I3
+*
+         AR    R5,R9
+         BCT   R2,DTM@J3
+         B     DTM@RT
+*
+* ---- LEFT / LOWER / TRANS ----
+*
+DTM@LLT  DS    0H
+         L     R5,DTM@BB
+         L     R2,DTM@N
+*
+DTM@J4   DS    0H
+         LR    R7,R5
+         L     R0,DTM@M
+         BCTR  R0,0
+         SLA   R0,3
+         AR    R7,R0
+         L     R6,DTM@AB
+         L     R0,DTM@M
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R6,R0
+         L     R3,DTM@M
+*
+DTM@I4   DS    0H
+         LD    0,DTM@ALP
+         LD    2,0(,R7)
+         MDBR  2,0
+         LR    R15,R3
+         BCTR  R15,0
+         LTR   R15,R15
+         BZ    DTM@P4
+         ST    R3,DTM@SL
+         L     R0,DTM@M
+         SR    R0,R3
+         LA    R0,1(,R0)
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LR    R3,R7
+         LA    R3,8(,R3)
+DTM@L4   DS    0H
+         LD    6,0(,R11)
+         MDB   6,0(,R3)
+         SDBR  2,6
+         LA    R11,8(,R11)
+         LA    R3,8(,R3)
+         BCT   R15,DTM@L4
+         L     R3,DTM@SL
+DTM@P4   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@Q4
+         L     R0,DTM@M
+         SR    R0,R3
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    6,0(,R11)
+         DDBR  2,6
+DTM@Q4   DS    0H
+         STD   2,0(,R7)
+         L     R0,=F'8'
+         SR    R7,R0
+         SR    R6,R8
+         BCT   R3,DTM@I4
+*
+         AR    R5,R9
+         BCT   R2,DTM@J4
+         B     DTM@RT
+*
+* ---- RIGHT / UPPER / NO-TRANS ----
+*
+DTM@RU   DS    0H
+         L     R5,DTM@BB
+         L     R2,DTM@N
+*
+DTM@J5   DS    0H
+         LD    0,DTM@ALP
+         LD    6,DTM@1
+         CDBR  0,6
+         BE    DTM@S5
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@C5   LD    2,0(,R6)
+         MDBR  2,0
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@C5
+DTM@S5   DS    0H
+         L     R15,DTM@N
+         SR    R15,R2
+         LTR   R15,R15
+         BZ    DTM@F5
+         L     R6,DTM@AB
+         L     R0,DTM@N
+         SR    R0,R2
+         MSR   R0,R8
+         AR    R6,R0
+         L     R1,DTM@BB
+         LR    R11,R6
+DTM@H5   DS    0H
+         LD    2,0(,R11)
+         LTDBR 2,2
+         BZ    DTM@G5
+         ST    R15,DTM@SL
+         LR    R7,R5
+         LR    R3,R1
+         L     R4,DTM@M
+DTM@E5   LD    6,0(,R3)
+         MDBR  6,2
+         LD    4,0(,R7)
+         SDBR  4,6
+         STD   4,0(,R7)
+         LA    R7,8(,R7)
+         LA    R3,8(,R3)
+         BCT   R4,DTM@E5
+         L     R15,DTM@SL
+DTM@G5   DS    0H
+         LA    R11,8(,R11)
+         AR    R1,R9
+         BCT   R15,DTM@H5
+DTM@F5   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@W5
+         L     R0,DTM@N
+         SR    R0,R2
+         SLA   R0,3
+         L     R6,DTM@AB
+         L     R1,DTM@N
+         SR    R1,R2
+         MSR   R1,R8
+         AR    R6,R1
+         AR    R6,R0
+         LD    6,0(,R6)
+         LD    2,DTM@1
+         DDBR  2,6
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@X5   LD    4,0(,R7)
+         MDBR  4,2
+         STD   4,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@X5
+DTM@W5   DS    0H
+         AR    R5,R9
+         BCT   R2,DTM@J5
+         B     DTM@RT
+*
+* ---- RIGHT / LOWER / NO-TRANS ----
+*
+DTM@RL   DS    0H
+         L     R5,DTM@BB
+         L     R0,DTM@N
+         BCTR  R0,0
+         MSR   R0,R9
+         AR    R5,R0
+         L     R2,DTM@N
+*
+DTM@J6   DS    0H
+         LD    0,DTM@ALP
+         LD    6,DTM@1
+         CDBR  0,6
+         BE    DTM@S6
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@C6   LD    2,0(,R6)
+         MDBR  2,0
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@C6
+DTM@S6   DS    0H
+         LR    R15,R2
+         BCTR  R15,0
+         LTR   R15,R15
+         BZ    DTM@F6
+         L     R6,DTM@AB
+         L     R0,DTM@N
+         SR    R0,R2
+         MSR   R0,R8
+         AR    R6,R0
+         L     R0,DTM@N
+         SR    R0,R2
+         LA    R0,1(,R0)
+         SLA   R0,3
+         AR    R6,R0
+         LR    R1,R5
+         AR    R1,R9
+DTM@H6   DS    0H
+         LD    2,0(,R6)
+         LTDBR 2,2
+         BZ    DTM@G6
+         ST    R15,DTM@SL
+         LR    R7,R5
+         LR    R3,R1
+         L     R4,DTM@M
+DTM@E6   LD    6,0(,R3)
+         MDBR  6,2
+         LD    4,0(,R7)
+         SDBR  4,6
+         STD   4,0(,R7)
+         LA    R7,8(,R7)
+         LA    R3,8(,R3)
+         BCT   R4,DTM@E6
+         L     R15,DTM@SL
+DTM@G6   DS    0H
+         LA    R6,8(,R6)
+         AR    R1,R9
+         BCT   R15,DTM@H6
+DTM@F6   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@W6
+         L     R6,DTM@AB
+         L     R0,DTM@N
+         SR    R0,R2
+         MSR   R0,R8
+         LR    R11,R6
+         AR    R11,R0
+         L     R0,DTM@N
+         SR    R0,R2
+         SLA   R0,3
+         AR    R11,R0
+         LD    6,0(,R11)
+         LD    2,DTM@1
+         DDBR  2,6
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@X6   LD    4,0(,R7)
+         MDBR  4,2
+         STD   4,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@X6
+DTM@W6   DS    0H
+         SR    R5,R9
+         BCT   R2,DTM@J6
+         B     DTM@RT
+*
+* ---- RIGHT / UPPER / TRANS ----
+*
+DTM@RUT  DS    0H
+         L     R2,DTM@N
+         L     R5,DTM@BB
+         L     R0,DTM@N
+         BCTR  R0,0
+         MSR   R0,R9
+         AR    R5,R0
+         L     R6,DTM@AB
+         L     R0,DTM@N
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R6,R0
+*
+DTM@J7   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@D7
+         L     R0,DTM@N
+         SR    R0,R2
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    6,0(,R11)
+         LD    2,DTM@1
+         DDBR  2,6
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@Y7   LD    4,0(,R7)
+         MDBR  4,2
+         STD   4,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@Y7
+DTM@D7   DS    0H
+         L     R15,DTM@N
+         SR    R15,R2
+         LTR   R15,R15
+         BZ    DTM@F7
+         L     R1,DTM@BB
+         LR    R11,R6
+DTM@H7   DS    0H
+         LD    2,0(,R11)
+         LTDBR 2,2
+         BZ    DTM@G7
+         ST    R15,DTM@SL
+         LR    R7,R1
+         LR    R3,R5
+         L     R4,DTM@M
+DTM@E7   LD    6,0(,R3)
+         MDBR  6,2
+         LD    4,0(,R7)
+         SDBR  4,6
+         STD   4,0(,R7)
+         LA    R7,8(,R7)
+         LA    R3,8(,R3)
+         BCT   R4,DTM@E7
+         L     R15,DTM@SL
+DTM@G7   DS    0H
+         LA    R11,8(,R11)
+         AR    R1,R9
+         BCT   R15,DTM@H7
+DTM@F7   DS    0H
+         LD    0,DTM@ALP
+         LD    6,DTM@1
+         CDBR  0,6
+         BE    DTM@W7
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@Z7   LD    2,0(,R7)
+         MDBR  2,0
+         STD   2,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@Z7
+DTM@W7   DS    0H
+         SR    R5,R9
+         SR    R6,R8
+         BCT   R2,DTM@J7
+         B     DTM@RT
+*
+* ---- RIGHT / LOWER / TRANS ----
+*
+DTM@RLT  DS    0H
+         L     R5,DTM@BB
+         L     R6,DTM@AB
+         L     R2,DTM@N
+*
+DTM@J8   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@D8
+         L     R0,DTM@N
+         SR    R0,R2
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    6,0(,R11)
+         LD    2,DTM@1
+         DDBR  2,6
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@Y8   LD    4,0(,R7)
+         MDBR  4,2
+         STD   4,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@Y8
+DTM@D8   DS    0H
+         LR    R15,R2
+         BCTR  R15,0
+         LTR   R15,R15
+         BZ    DTM@F8
+         L     R0,DTM@N
+         SR    R0,R2
+         LA    R0,1(,R0)
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LR    R1,R5
+         AR    R1,R9
+DTM@H8   DS    0H
+         LD    2,0(,R11)
+         LTDBR 2,2
+         BZ    DTM@G8
+         ST    R15,DTM@SL
+         LR    R7,R1
+         LR    R3,R5
+         L     R4,DTM@M
+DTM@E8   LD    6,0(,R3)
+         MDBR  6,2
+         LD    4,0(,R7)
+         SDBR  4,6
+         STD   4,0(,R7)
+         LA    R7,8(,R7)
+         LA    R3,8(,R3)
+         BCT   R4,DTM@E8
+         L     R15,DTM@SL
+DTM@G8   DS    0H
+         LA    R11,8(,R11)
+         AR    R1,R9
+         BCT   R15,DTM@H8
+DTM@F8   DS    0H
+         LD    0,DTM@ALP
+         LD    6,DTM@1
+         CDBR  0,6
+         BE    DTM@W8
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@Z8   LD    2,0(,R7)
+         MDBR  2,0
+         STD   2,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@Z8
+DTM@W8   DS    0H
+         AR    R5,R9
+         AR    R6,R8
+         BCT   R2,DTM@J8
+         B     DTM@RT
+*
+DTM@RT   DS    0H
+         LM    R14,R12,12(R13)
+         BR    R14
+*
+* ---- Local storage ----
+*
+         DS    0D
+DTM@M    DS    F
+DTM@N    DS    F
+DTM@LDA  DS    F
+DTM@LDB  DS    F
+         DS    0C
+DTM@SD   DS    C
+DTM@UP   DS    C
+DTM@TR   DS    C
+DTM@DG   DS    C
+         DS    0D
+DTM@ALP  DS    D
+DTM@AB   DS    F
+DTM@BB   DS    F
+DTM@SL   DS    F
+         DS    0D
+DTM@1    DC    X'3FF0000000000000'
+         LTORG
+         END   TSTDTRSM

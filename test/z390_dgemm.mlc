@@ -1,0 +1,687 @@
+*---------------------------------------------------------------------*
+* Z390_DGEMM - Self-contained z390 test for DGEMM scalar path.       *
+* Two CSECTs: test harness + scalar DGEMM. No VF, no STFLE.          *
+* All doubles are IEEE 754 BFP (DC X'...'). Column-major 2x2.        *
+*                                                                     *
+* A=[1,2,3,4] B=[5,6,7,8] stored column-major, LDA=LDB=LDC=2.       *
+* If you think column-major is intuitive, you may also enjoy          *
+* reading books back-to-front and driving on the left.                *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+* ---- TEST HARNESS ----
+*
+TSTDGEMM CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING TSTDGEMM,R12
+         LA    R10,TSAVE
+         ST    R13,4(,R10)
+         ST    R10,8(,R13)
+         LR    R13,R10
+*
+         WTO   'ZBLAS DGEMM z390 test'
+*
+* ============================================================= *
+* TEST 1: NN, alpha=1, beta=0, C = A*B                          *
+* Expected: [23, 34, 31, 46]                                     *
+* ============================================================= *
+*
+         WTO   'T1: NN a=1 b=0'
+         MVC   T1C(32),T1CINI             Reset C
+         LA    R1,T1PL
+         L     R15,=A(DGEMM)
+         BALR  R14,R15
+* Check C(1,1) = 23
+         LD    0,T1C
+         CDB   0,T1E1
+         BE    T1P1
+         WTO   'FAIL C11!=23'
+         B     T1C2
+T1P1     WTO   'PASS C11=23'
+T1C2     DS    0H
+         LD    0,T1C+8
+         CDB   0,T1E2
+         BE    T1P2
+         WTO   'FAIL C21!=34'
+         B     T1C3
+T1P2     WTO   'PASS C21=34'
+T1C3     DS    0H
+         LD    0,T1C+16
+         CDB   0,T1E3
+         BE    T1P3
+         WTO   'FAIL C12!=31'
+         B     T1C4
+T1P3     WTO   'PASS C12=31'
+T1C4     DS    0H
+         LD    0,T1C+24
+         CDB   0,T1E4
+         BE    T1P4
+         WTO   'FAIL C22!=46'
+         B     TST2
+T1P4     WTO   'PASS C22=46'
+*
+* ============================================================= *
+* TEST 2: NN, alpha=2, beta=1, C_init=[1,1,1,1]                 *
+* Expected: [47, 69, 63, 93]                                     *
+* ============================================================= *
+*
+TST2     DS    0H
+         WTO   'T2: NN a=2 b=1'
+         MVC   T2C(32),T2CINI
+         LA    R1,T2PL
+         L     R15,=A(DGEMM)
+         BALR  R14,R15
+         LD    0,T2C
+         CDB   0,T2E1
+         BE    T2P1
+         WTO   'FAIL C11!=47'
+         B     T2K2
+T2P1     WTO   'PASS C11=47'
+T2K2     DS    0H
+         LD    0,T2C+8
+         CDB   0,T2E2
+         BE    T2P2
+         WTO   'FAIL C21!=69'
+         B     T2K3
+T2P2     WTO   'PASS C21=69'
+T2K3     DS    0H
+         LD    0,T2C+16
+         CDB   0,T2E3
+         BE    T2P3
+         WTO   'FAIL C12!=63'
+         B     T2K4
+T2P3     WTO   'PASS C12=63'
+T2K4     DS    0H
+         LD    0,T2C+24
+         CDB   0,T2E4
+         BE    T2P4
+         WTO   'FAIL C22!=93'
+         B     TST3
+T2P4     WTO   'PASS C22=93'
+*
+* ============================================================= *
+* TEST 3: alpha=0, beta=2, C=[1,2,3,4] -> [2,4,6,8]             *
+* ============================================================= *
+*
+TST3     DS    0H
+         WTO   'T3: a=0 b=2'
+         MVC   T3C(32),T3CINI
+         LA    R1,T3PL
+         L     R15,=A(DGEMM)
+         BALR  R14,R15
+         LD    0,T3C
+         CDB   0,T3E1
+         BE    T3P1
+         WTO   'FAIL C11!=2'
+         B     T3K2
+T3P1     WTO   'PASS C11=2'
+T3K2     DS    0H
+         LD    0,T3C+8
+         CDB   0,T3E2
+         BE    T3P2
+         WTO   'FAIL C21!=4'
+         B     T3K3
+T3P2     WTO   'PASS C21=4'
+T3K3     DS    0H
+         LD    0,T3C+16
+         CDB   0,T3E3
+         BE    T3P3
+         WTO   'FAIL C12!=6'
+         B     T3K4
+T3P3     WTO   'PASS C12=6'
+T3K4     DS    0H
+         LD    0,T3C+24
+         CDB   0,T3E4
+         BE    T3P4
+         WTO   'FAIL C22!=8'
+         B     TST4
+T3P4     WTO   'PASS C22=8'
+*
+* ============================================================= *
+* TEST 4: N=0, quick return (no crash)                           *
+* ============================================================= *
+*
+TST4     DS    0H
+         WTO   'T4: N=0'
+         LA    R1,T4PL
+         L     R15,=A(DGEMM)
+         BALR  R14,R15
+         WTO   'PASS N=0'
+*
+* ---- DONE ----
+*
+         WTO   'DGEMM: ALL TESTS DONE'
+         L     R13,4(,R13)
+         LM    R14,R12,12(R13)
+         SR    R15,R15
+         BR    R14
+*
+* ---- Test data ----
+*
+TSAVE    DS    18F
+*
+* ---- Common matrices (BFP hex) ----
+*
+         DS    0D
+* A = [1,2,3,4] column-major
+COMA     DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+* B = [5,6,7,8] column-major
+COMB     DC    X'4014000000000000'         5.0
+         DC    X'4018000000000000'         6.0
+         DC    X'401C000000000000'         7.0
+         DC    X'4020000000000000'         8.0
+*
+* ---- Test 1: NN, alpha=1, beta=0 ----
+*
+         DS    0D
+T1TA     DC    X'D5'                       EBCDIC 'N'
+T1TB     DC    X'D5'                       EBCDIC 'N'
+         DS    0F
+T1M      DC    F'2'
+T1N      DC    F'2'
+T1K      DC    F'2'
+         DS    0D
+T1ALP    DC    X'3FF0000000000000'         1.0
+T1LDA    DC    F'2'
+T1LDB    DC    F'2'
+         DS    0D
+T1BET    DC    X'0000000000000000'         0.0
+T1C      DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DC    X'0000000000000000'
+T1LDC    DC    F'2'
+T1CINI   DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DC    X'0000000000000000'
+         DS    0D
+T1E1     DC    X'4037000000000000'         23.0
+T1E2     DC    X'4041000000000000'         34.0
+T1E3     DC    X'403F000000000000'         31.0
+T1E4     DC    X'4047000000000000'         46.0
+T1PL     DC    A(T1TA,T1TB,T1M,T1N,T1K,T1ALP,COMA,T1LDA)
+         DC    A(COMB,T1LDB,T1BET,T1C)
+         DC    X'80',AL3(T1LDC)
+*
+* ---- Test 2: NN, alpha=2, beta=1 ----
+*
+         DS    0D
+T2TA     DC    X'D5'
+T2TB     DC    X'D5'
+         DS    0F
+T2M      DC    F'2'
+T2N      DC    F'2'
+T2K      DC    F'2'
+         DS    0D
+T2ALP    DC    X'4000000000000000'         2.0
+T2LDA    DC    F'2'
+T2LDB    DC    F'2'
+         DS    0D
+T2BET    DC    X'3FF0000000000000'         1.0
+T2C      DC    X'3FF0000000000000'         1.0
+         DC    X'3FF0000000000000'         1.0
+         DC    X'3FF0000000000000'         1.0
+         DC    X'3FF0000000000000'         1.0
+T2LDC    DC    F'2'
+T2CINI   DC    X'3FF0000000000000'         1.0
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DS    0D
+T2E1     DC    X'4047800000000000'         47.0
+T2E2     DC    X'4051400000000000'         69.0
+T2E3     DC    X'404F800000000000'         63.0
+T2E4     DC    X'4057400000000000'         93.0
+T2PL     DC    A(T2TA,T2TB,T2M,T2N,T2K,T2ALP,COMA,T2LDA)
+         DC    A(COMB,T2LDB,T2BET,T2C)
+         DC    X'80',AL3(T2LDC)
+*
+* ---- Test 3: alpha=0, beta=2 ----
+*
+         DS    0D
+T3TA     DC    X'D5'
+T3TB     DC    X'D5'
+         DS    0F
+T3M      DC    F'2'
+T3N      DC    F'2'
+T3K      DC    F'2'
+         DS    0D
+T3ALP    DC    X'0000000000000000'         0.0
+T3LDA    DC    F'2'
+T3LDB    DC    F'2'
+         DS    0D
+T3BET    DC    X'4000000000000000'         2.0
+T3C      DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+T3LDC    DC    F'2'
+T3CINI   DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+         DS    0D
+T3E1     DC    X'4000000000000000'         2.0
+T3E2     DC    X'4010000000000000'         4.0
+T3E3     DC    X'4018000000000000'         6.0
+T3E4     DC    X'4020000000000000'         8.0
+T3PL     DC    A(T3TA,T3TB,T3M,T3N,T3K,T3ALP,COMA,T3LDA)
+         DC    A(COMB,T3LDB,T3BET,T3C)
+         DC    X'80',AL3(T3LDC)
+*
+* ---- Test 4: N=0 (quick return) ----
+*
+         DS    0D
+T4TA     DC    X'D5'
+T4TB     DC    X'D5'
+         DS    0F
+T4M      DC    F'2'
+T4N      DC    F'0'
+T4K      DC    F'2'
+         DS    0D
+T4ALP    DC    X'3FF0000000000000'         1.0
+T4LDA    DC    F'2'
+T4LDB    DC    F'2'
+         DS    0D
+T4BET    DC    X'3FF0000000000000'         1.0
+T4C      DC    X'3FF0000000000000'         1.0
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+T4LDC    DC    F'2'
+T4PL     DC    A(T4TA,T4TB,T4M,T4N,T4K,T4ALP,COMA,T4LDA)
+         DC    A(COMB,T4LDB,T4BET,T4C)
+         DC    X'80',AL3(T4LDC)
+*
+         LTORG
+         DROP  R12
+*
+* ============================================================= *
+* DGEMM - scalar only (no VF, no STFLE, z390 safe)              *
+* C := alpha * op(A) * op(B) + beta * C                          *
+*                                                                 *
+* 13 parms via OS linkage. Handles NN/NT/TN/TT.                  *
+* The sort of code that makes you appreciate Fortran.             *
+* ============================================================= *
+*
+DGEMM    CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING DGEMM,R12
+         LR    R11,R1
+*
+* ---- Extract parameters ----
+* R0 cannot be base register. Use R1 for dereference.
+*
+         L     R1,0(,R11)
+         MVC   DGM@TA(1),0(R1)
+         L     R1,4(,R11)
+         MVC   DGM@TB(1),0(R1)
+         L     R1,8(,R11)
+         L     R1,0(,R1)
+         ST    R1,DGM@M
+         L     R1,12(,R11)
+         L     R1,0(,R1)
+         ST    R1,DGM@N
+         L     R1,16(,R11)
+         L     R1,0(,R1)
+         ST    R1,DGM@K
+         L     R1,20(,R11)
+         LD    0,0(,R1)
+         STD   0,DGM@ALP
+         L     R1,24(,R11)
+         ST    R1,DGM@AB
+         L     R1,28(,R11)
+         L     R1,0(,R1)
+         ST    R1,DGM@LDA
+         L     R1,32(,R11)
+         ST    R1,DGM@BB
+         L     R1,36(,R11)
+         L     R1,0(,R1)
+         ST    R1,DGM@LDB
+         L     R1,40(,R11)
+         LD    4,0(,R1)
+         STD   4,DGM@BET
+         L     R1,44(,R11)
+         ST    R1,DGM@CB
+         L     R1,48(,R11)
+         N     R1,=X'7FFFFFFF'
+         L     R1,0(,R1)
+         ST    R1,DGM@LDC
+*
+* ---- Quick return ----
+*
+         L     R0,DGM@M
+         LTR   R0,R0
+         BNP   DGM@RT
+         L     R0,DGM@N
+         LTR   R0,R0
+         BNP   DGM@RT
+*
+* ---- Byte strides ----
+*
+         L     R8,DGM@LDA
+         SLA   R8,3
+         L     R9,DGM@LDB
+         SLA   R9,3
+         L     R10,DGM@LDC
+         SLA   R10,3
+*
+* ---- Alpha == 0: scale C by beta ----
+*
+         LD    0,DGM@ALP
+         LTDBR 0,0
+         BNZ   DGM@GO
+         L     R5,DGM@CB
+         L     R2,DGM@N
+         LD    4,DGM@BET
+         LTDBR 4,4
+         BZ    DGM@AZ
+DGM@AS   DS    0H
+         LR    R6,R5
+         L     R4,DGM@M
+DGM@A1   DS    0H
+         LD    2,0(,R6)
+         MDBR  2,4
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@A1
+         AR    R5,R10
+         BCT   R2,DGM@AS
+         B     DGM@RT
+DGM@AZ   DS    0H
+         LR    R6,R5
+         L     R4,DGM@M
+         SDBR  2,2
+DGM@A2   DS    0H
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@A2
+         AR    R5,R10
+         BCT   R2,DGM@AZ
+         B     DGM@RT
+*
+* ---- Dispatch ----
+*
+DGM@GO   DS    0H
+         CLI   DGM@TA,X'D5'
+         BNE   DGM@TX
+         CLI   DGM@TB,X'D5'
+         BNE   DGM@NT
+         B     DGM@NN
+DGM@TX   DS    0H
+         CLI   DGM@TB,X'D5'
+         BNE   DGM@TT
+         B     DGM@TN
+*
+* ---- NN case ----
+*
+DGM@NN   DS    0H
+         LD    0,DGM@ALP
+         LD    4,DGM@BET
+         L     R5,DGM@CB
+         L     R7,DGM@BB
+         L     R2,DGM@N
+DGM@NJL  DS    0H
+         LTDBR 4,4
+         BZ    DGM@NBZ
+         LD    6,DGM@1
+         CDBR  4,6
+         BE    DGM@NB1
+         LR    R6,R5
+         L     R4,DGM@M
+DGM@NBS  DS    0H
+         LD    2,0(,R6)
+         MDBR  2,4
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@NBS
+         B     DGM@NB1
+DGM@NBZ  DS    0H
+         LR    R6,R5
+         L     R4,DGM@M
+         SDBR  2,2
+DGM@NZ1  DS    0H
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@NZ1
+DGM@NB1  DS    0H
+         L     R6,DGM@AB
+         LR    R1,R7
+         L     R3,DGM@K
+         LTR   R3,R3
+         BNP   DGM@NJN
+DGM@NLL  DS    0H
+         LD    2,0(,R1)
+         MDBR  2,0
+         LTDBR 2,2
+         BZ    DGM@NLX
+         ST    R3,DGM@SL
+         LR    R11,R5
+         LR    R3,R6
+         L     R4,DGM@M
+DGM@NIL  DS    0H
+         LD    6,0(,R3)
+         MDBR  6,2
+         ADB   6,0(,R11)
+         STD   6,0(,R11)
+         LA    R3,8(,R3)
+         LA    R11,8(,R11)
+         BCT   R4,DGM@NIL
+         L     R3,DGM@SL
+DGM@NLX  DS    0H
+         AR    R6,R8
+         LA    R1,8(,R1)
+         BCT   R3,DGM@NLL
+DGM@NJN  DS    0H
+         AR    R5,R10
+         AR    R7,R9
+         BCT   R2,DGM@NJL
+         B     DGM@RT
+*
+* ---- NT case ----
+*
+DGM@NT   DS    0H
+         LD    0,DGM@ALP
+         LD    4,DGM@BET
+         L     R5,DGM@CB
+         L     R2,DGM@N
+         SR    R7,R7
+DGM@TJL  DS    0H
+         LTDBR 4,4
+         BZ    DGM@TBZ
+         LD    6,DGM@1
+         CDBR  4,6
+         BE    DGM@TB1
+         LR    R6,R5
+         L     R4,DGM@M
+DGM@TBS  DS    0H
+         LD    2,0(,R6)
+         MDBR  2,4
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@TBS
+         B     DGM@TB1
+DGM@TBZ  DS    0H
+         LR    R6,R5
+         L     R4,DGM@M
+         SDBR  2,2
+DGM@TZ1  DS    0H
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@TZ1
+DGM@TB1  DS    0H
+         L     R6,DGM@AB
+         L     R1,DGM@BB
+         L     R3,DGM@K
+         LTR   R3,R3
+         BNP   DGM@TJN
+DGM@TLL  DS    0H
+         LR    R11,R1
+         AR    R11,R7
+         LD    2,0(,R11)
+         MDBR  2,0
+         LTDBR 2,2
+         BZ    DGM@TLX
+         ST    R3,DGM@SL
+         LR    R11,R5
+         LR    R3,R6
+         L     R4,DGM@M
+DGM@TIL  DS    0H
+         LD    6,0(,R3)
+         MDBR  6,2
+         ADB   6,0(,R11)
+         STD   6,0(,R11)
+         LA    R3,8(,R3)
+         LA    R11,8(,R11)
+         BCT   R4,DGM@TIL
+         L     R3,DGM@SL
+DGM@TLX  DS    0H
+         AR    R6,R8
+         AR    R1,R9
+         BCT   R3,DGM@TLL
+DGM@TJN  DS    0H
+         AR    R5,R10
+         LA    R7,8(,R7)
+         BCT   R2,DGM@TJL
+         B     DGM@RT
+*
+* ---- TN case ----
+*
+DGM@TN   DS    0H
+         LD    0,DGM@ALP
+         LD    4,DGM@BET
+         L     R5,DGM@CB
+         L     R7,DGM@BB
+         L     R2,DGM@N
+DGM@XJL  DS    0H
+         L     R6,DGM@AB
+         LR    R11,R5
+         L     R4,DGM@M
+DGM@XIL  DS    0H
+         SDBR  2,2
+         ST    R4,DGM@SL
+         LR    R3,R6
+         LR    R1,R7
+         L     R4,DGM@K
+         LTR   R4,R4
+         BNP   DGM@XLS
+DGM@XLL  DS    0H
+         LD    6,0(,R3)
+         MDB   6,0(,R1)
+         ADBR  2,6
+         LA    R3,8(,R3)
+         LA    R1,8(,R1)
+         BCT   R4,DGM@XLL
+DGM@XLS  DS    0H
+         MDBR  2,0
+         LTDBR 4,4
+         BZ    DGM@XST
+         LD    6,0(,R11)
+         MDBR  6,4
+         ADBR  2,6
+DGM@XST DS    0H
+         STD   2,0(,R11)
+         L     R4,DGM@SL
+         LA    R11,8(,R11)
+         AR    R6,R8
+         BCT   R4,DGM@XIL
+         AR    R5,R10
+         AR    R7,R9
+         BCT   R2,DGM@XJL
+         B     DGM@RT
+*
+* ---- TT case ----
+*
+DGM@TT   DS    0H
+         LD    0,DGM@ALP
+         LD    4,DGM@BET
+         L     R5,DGM@CB
+         L     R2,DGM@N
+         SR    R7,R7
+DGM@YJL  DS    0H
+         L     R6,DGM@AB
+         LR    R11,R5
+         L     R4,DGM@M
+DGM@YIL  DS    0H
+         SDBR  2,2
+         ST    R4,DGM@SL
+         LR    R3,R6
+         L     R1,DGM@BB
+         L     R4,DGM@K
+         LTR   R4,R4
+         BNP   DGM@YLS
+DGM@YLL  DS    0H
+         LD    6,0(,R3)
+         LR    R15,R1
+         AR    R15,R7
+         MDB   6,0(,R15)
+         ADBR  2,6
+         LA    R3,8(,R3)
+         AR    R1,R9
+         BCT   R4,DGM@YLL
+DGM@YLS  DS    0H
+         MDBR  2,0
+         LTDBR 4,4
+         BZ    DGM@YST
+         LD    6,0(,R11)
+         MDBR  6,4
+         ADBR  2,6
+DGM@YST DS    0H
+         STD   2,0(,R11)
+         L     R4,DGM@SL
+         LA    R11,8(,R11)
+         AR    R6,R8
+         BCT   R4,DGM@YIL
+         AR    R5,R10
+         LA    R7,8(,R7)
+         BCT   R2,DGM@YJL
+         B     DGM@RT
+*
+DGM@RT   DS    0H
+         LM    R14,R12,12(R13)
+         BR    R14
+*
+* ---- Local storage ----
+*
+         DS    0D
+DGM@M    DS    F
+DGM@N    DS    F
+DGM@K    DS    F
+DGM@LDA  DS    F
+DGM@LDB  DS    F
+DGM@LDC  DS    F
+         DS    0C
+DGM@TA   DS    C
+DGM@TB   DS    C
+         DS    0D
+DGM@ALP  DS    D
+DGM@BET  DS    D
+DGM@AB   DS    F
+DGM@BB   DS    F
+DGM@CB   DS    F
+DGM@SL   DS    F
+         DS    0D
+DGM@1    DC    X'3FF0000000000000'
+         LTORG
+         END   TSTDGEMM

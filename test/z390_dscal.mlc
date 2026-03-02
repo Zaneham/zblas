@@ -1,0 +1,189 @@
+*---------------------------------------------------------------------*
+* Z390_DSCAL - Self-contained z390 test for DSCAL scalar path.       *
+* One file, two CSECTs, proper OS linkage. No VF instructions.       *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+* ---- TEST HARNESS ----
+*
+TSTDSCAL CSECT
+         STM   R14,R12,12(R13)            Save z390 context
+         LR    R12,R15                     Base = entry point
+         USING TSTDSCAL,R12
+         LA    R10,TSAVE                   Our save area
+         ST    R13,4(,R10)                 Back-chain to z390 SA
+         ST    R10,8(,R13)                 Forward-chain
+         LR    R13,R10                     R13 = our SA
+*
+         WTO   'ZBLAS DSCAL z390 test'
+*
+* ---- TEST 1: alpha=2, X=[1,2,3], N=3 -> expect X=[2,4,6] ----
+*
+         WTO   'T1: alpha=2 X=[1,2,3] N=3'
+         MVC   T1X(24),T1XINI             Reset X to [1,2,3]
+         LA    R1,T1PL
+         L     R15,=A(DSCAL)
+         BALR  R14,R15
+*
+         LD    0,T1X                       X(1)
+         CDB   0,T1E1
+         BE    T1P1
+         WTO   'FAIL X1!=2'
+         B     T1C2
+T1P1     WTO   'PASS X1=2'
+T1C2     DS    0H
+         LD    0,T1X+8                     X(2)
+         CDB   0,T1E2
+         BE    T1P2
+         WTO   'FAIL X2!=4'
+         B     T1C3
+T1P2     WTO   'PASS X2=4'
+T1C3     DS    0H
+         LD    0,T1X+16                    X(3)
+         CDB   0,T1E3
+         BE    T1P3
+         WTO   'FAIL X3!=6'
+         B     TST2
+T1P3     WTO   'PASS X3=6'
+*
+* ---- TEST 2: N=0 -> no crash ----
+*
+TST2     DS    0H
+         WTO   'T2: N=0'
+         LA    R1,T2PL
+         L     R15,=A(DSCAL)
+         BALR  R14,R15
+         WTO   'PASS N=0'
+*
+* ---- TEST 3: alpha=0, X=[5,10], N=2 -> expect X=[0,0] ----
+*
+TST3     DS    0H
+         WTO   'T3: alpha=0 X=[5,10] N=2'
+         MVC   T3X(16),T3XINI             Reset X to [5,10]
+         LA    R1,T3PL
+         L     R15,=A(DSCAL)
+         BALR  R14,R15
+*
+         LD    0,T3X                       X(1)
+         CDB   0,T3E1
+         BE    T3P1
+         WTO   'FAIL X1!=0'
+         B     T3C2
+T3P1     WTO   'PASS X1=0'
+T3C2     DS    0H
+         LD    0,T3X+8                     X(2)
+         CDB   0,T3E2
+         BE    T3P2
+         WTO   'FAIL X2!=0'
+         B     DONE
+T3P2     WTO   'PASS X2=0'
+*
+* ---- DONE ----
+*
+DONE     DS    0H
+         WTO   'DSCAL: ALL TESTS DONE'
+         L     R13,4(,R13)                 Restore z390 SA
+         LM    R14,R12,12(R13)             Restore z390 regs
+         SR    R15,R15                     RC=0
+         BR    R14
+*
+* ---- Test data ----
+*
+TSAVE    DS    18F                         Our save area
+         DS    0D
+*
+* Test 1: alpha=2, X=[1,2,3], N=3
+T1N      DC    F'3'
+T1A      DC    X'4000000000000000'         BFP 2.0
+T1X      DC    X'3FF0000000000000'         BFP 1.0
+         DC    X'4000000000000000'         BFP 2.0
+         DC    X'4008000000000000'         BFP 3.0
+T1IX     DC    F'1'
+T1XINI   DC    X'3FF0000000000000'         BFP 1.0
+         DC    X'4000000000000000'         BFP 2.0
+         DC    X'4008000000000000'         BFP 3.0
+T1E1     DC    X'4000000000000000'         BFP 2.0
+T1E2     DC    X'4010000000000000'         BFP 4.0
+T1E3     DC    X'4018000000000000'         BFP 6.0
+T1PL     DC    A(T1N,T1A,T1X)
+         DC    X'80',AL3(T1IX)
+         DS    0D
+*
+* Test 2: N=0, no crash
+T2N      DC    F'0'
+T2A      DC    X'4000000000000000'         BFP 2.0
+T2X      DC    X'3FF0000000000000'         BFP 1.0
+T2IX     DC    F'1'
+T2PL     DC    A(T2N,T2A,T2X)
+         DC    X'80',AL3(T2IX)
+         DS    0D
+*
+* Test 3: alpha=0, X=[5,10], N=2
+T3N      DC    F'2'
+T3A      DC    X'0000000000000000'         BFP 0.0
+T3X      DC    X'4014000000000000'         BFP 5.0
+         DC    X'4024000000000000'         BFP 10.0
+T3IX     DC    F'1'
+T3XINI   DC    X'4014000000000000'         BFP 5.0
+         DC    X'4024000000000000'         BFP 10.0
+T3E1     DC    X'0000000000000000'         BFP 0.0
+T3E2     DC    X'0000000000000000'         BFP 0.0
+T3PL     DC    A(T3N,T3A,T3X)
+         DC    X'80',AL3(T3IX)
+         LTORG
+         DROP  R12
+*
+* ============================================================= *
+* DSCAL - scalar only (no VF, no STFLE, z390 safe)              *
+* ============================================================= *
+*
+DSCAL    CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING DSCAL,R12
+         LR    R11,R1
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   DSC@RT
+         L     R3,4(,R11)
+         LD    0,0(,R3)                    alpha
+         L     R4,8(,R11)                  DX
+         L     R5,12(,R11)
+         L     R5,0(,R5)                   INCX
+         SLA   R5,3
+         LTR   R5,R5
+         BNM   DSC@SL
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R5
+         LCR   R0,R0
+         AR    R4,R0
+DSC@SL   DS    0H
+         LR    R8,R2
+DSC@S1   DS    0H
+         LD    2,0(,R4)
+         MDBR  2,0
+         STD   2,0(,R4)
+         AR    R4,R5
+         BCT   R8,DSC@S1
+DSC@RT   DS    0H
+         LM    R14,R12,12(R13)
+         BR    R14
+         LTORG
+         END   TSTDSCAL

@@ -1,0 +1,339 @@
+*---------------------------------------------------------------------*
+* DTRSV - Double-precision TRiangular Solve (Vector)                  *
+*                                                                     *
+* Solves op(A)*x = b in place. {U,L} x {N,T}, unit/non-unit diag.    *
+*                                                                     *
+* OS linkage (R1 -> addr list, 8 parms):                              *
+*   +0  UPLO (char)  +4  TRANS (char) +8  DIAG (char) +12 N (F)      *
+*  +16  A (array)   +20  LDA (F)     +24  X (array)   +28 INCX(0x80) *
+*                                                                     *
+* Scalar only. Not reentrant.                                         *
+* Written in the hope that nobody will ever need to debug it.         *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DTRSV
+*
+* ---- Extract parameters ----
+*
+         LR    R11,R1                      Parm list base
+*
+         L     R1,0(,R11)                  Addr of UPLO
+         MVC   DTV@UP(1),0(R1)
+         L     R1,4(,R11)                  Addr of TRANS
+         MVC   DTV@TR(1),0(R1)
+         L     R1,8(,R11)                  Addr of DIAG
+         MVC   DTV@DG(1),0(R1)
+*
+         L     R1,12(,R11)                 Addr of N
+         L     R1,0(,R1)
+         ST    R1,DTV@N
+*
+         L     R1,16(,R11)                 A base
+         ST    R1,DTV@AB
+         L     R1,20(,R11)                 Addr of LDA
+         L     R1,0(,R1)
+         ST    R1,DTV@LDA
+*
+         L     R1,24(,R11)                 X base
+         ST    R1,DTV@XB
+         L     R1,28(,R11)                 Addr of INCX (high bit)
+         N     R1,=X'7FFFFFFF'
+         L     R1,0(,R1)
+         ST    R1,DTV@IX
+*
+* ---- Quick return: N <= 0 ----
+*
+         L     R0,DTV@N
+         LTR   R0,R0
+         BNP   DTV@RT
+*
+* ---- Compute byte strides ----
+*
+         L     R8,DTV@LDA
+         SLA   R8,3                        LDA * 8
+         L     R7,DTV@IX
+         SLA   R7,3                        INCX * 8
+*
+* ---- Adjust X base for negative INCX ----
+*
+         LTR   R7,R7
+         BNM   DTV@GO
+         L     R0,DTV@N
+         BCTR  R0,0                        N-1
+         MSR   R0,R7                       (N-1)*INCX*8 (neg)
+         LCR   R0,R0
+         L     R1,DTV@XB
+         AR    R1,R0
+         ST    R1,DTV@XB
+*
+* ---- Dispatch: {U,L} x {N,T} ----
+*
+DTV@GO   DS    0H
+         CLI   DTV@TR,X'D5'               TRANS='N'?
+         BNE   DTV@TX
+         CLI   DTV@UP,X'E4'               UPLO='U'?
+         BE    DTV@UN
+         B     DTV@LN
+DTV@TX   DS    0H
+         CLI   DTV@UP,X'E4'
+         BE    DTV@UT
+         B     DTV@LT
+*
+* ============================================================= *
+* UPPER / NO-TRANS: back substitution                              *
+*                                                                 *
+* for j=N-1 downto 0:                                              *
+*   if DIAG='N': x(j) /= A(j,j)                                   *
+*   for i=0..j-1: x(i) -= x(j)*A(i,j)                             *
+*                                                                 *
+* R2=j counter, R4=x(j) ptr, R5=A col ptr                         *
+* R3=inner count, R6=x inner, R11=A inner                          *
+* FPR0=temp, FPR2=A elem, FPR4=scratch                             *
+* ============================================================= *
+*
+DTV@UN   DS    0H
+         L     R2,DTV@N                    outer counter
+* A col for j=N-1
+         L     R5,DTV@AB
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R5,R0                       A + (N-1)*LDA*8
+* x ptr for j=N-1
+         L     R4,DTV@XB
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R7
+         AR    R4,R0                       x + (N-1)*INCX*8
+*
+DTV@UJL  DS    0H                          ---- J loop (U/N) ----
+         CLI   DTV@DG,X'D5'
+         BNE   DTV@USD
+         LR    R0,R2
+         BCTR  R0,0                        j (0-based)
+         SLA   R0,3                        j*8
+         LR    R11,R5
+         AR    R11,R0                      A(j,j) ptr
+         LD    FPR0,0(,R4)                x(j)
+         LD    FPR2,0(,R11)               A(j,j)
+         DDBR  FPR0,FPR2                  x(j) /= A(j,j)
+         STD   FPR0,0(,R4)
+         B     DTV@UIN
+DTV@USD  DS    0H
+         LD    FPR0,0(,R4)                temp = x(j)
+DTV@UIN  DS    0H
+         LR    R3,R2
+         BCTR  R3,0                        count = j
+         LTR   R3,R3
+         BZ    DTV@UJN
+         L     R6,DTV@XB                  x(0) ptr
+         LR    R11,R5                      A(0,j) ptr
+DTV@UIL  DS    0H
+         LD    FPR2,0(,R11)               A(i,j)
+         MDBR  FPR2,FPR0                  temp * A(i,j)
+         LD    FPR4,0(,R6)                x(i)
+         SDBR  FPR4,FPR2                  x(i) -= temp*A(i,j)
+         STD   FPR4,0(,R6)
+         LA    R11,8(,R11)                 next A row
+         AR    R6,R7                       next x
+         BCT   R3,DTV@UIL
+*
+DTV@UJN  DS    0H                          ---- advance J ----
+         SR    R5,R8                       A col -= LDA*8
+         SR    R4,R7                       x -= INCX*8
+         BCT   R2,DTV@UJL
+         B     DTV@RT
+*
+* ============================================================= *
+* LOWER / NO-TRANS: forward substitution                           *
+*                                                                 *
+* for j=0..N-1:                                                    *
+*   if DIAG='N': x(j) /= A(j,j)                                   *
+*   for i=j+1..N-1: x(i) -= x(j)*A(i,j)                           *
+* ============================================================= *
+*
+DTV@LN   DS    0H
+         L     R5,DTV@AB                  A col ptr (col 0)
+         L     R4,DTV@XB                  x(0) ptr
+         L     R2,DTV@N                   outer counter
+*
+DTV@LJL  DS    0H                          ---- J loop (L/N) ----
+         L     R0,DTV@N
+         SR    R0,R2                       j (0-based)
+         SLA   R0,3                        j*8
+         CLI   DTV@DG,X'D5'
+         BNE   DTV@LSD
+         LR    R11,R5
+         AR    R11,R0                      A(j,j)
+         LD    FPR0,0(,R4)
+         LD    FPR2,0(,R11)
+         DDBR  FPR0,FPR2
+         STD   FPR0,0(,R4)
+         B     DTV@LIN
+DTV@LSD  DS    0H
+         LD    FPR0,0(,R4)
+DTV@LIN  DS    0H
+         LR    R3,R2
+         BCTR  R3,0                        count = R2-1
+         LTR   R3,R3
+         BZ    DTV@LJN
+         LR    R6,R4
+         AR    R6,R7                       x(j+1)
+         LR    R11,R5
+         AR    R11,R0                      A(j,j)
+         LA    R11,8(,R11)                 A(j+1,j)
+DTV@LIL  DS    0H
+         LD    FPR2,0(,R11)
+         MDBR  FPR2,FPR0
+         LD    FPR4,0(,R6)
+         SDBR  FPR4,FPR2
+         STD   FPR4,0(,R6)
+         LA    R11,8(,R11)
+         AR    R6,R7
+         BCT   R3,DTV@LIL
+*
+DTV@LJN  DS    0H
+         AR    R5,R8                       A col += LDA*8
+         AR    R4,R7                       x += INCX*8
+         BCT   R2,DTV@LJL
+         B     DTV@RT
+*
+* ============================================================= *
+* UPPER / TRANS: forward dot                                       *
+*                                                                 *
+* for j=0..N-1:                                                    *
+*   temp = x(j)                                                    *
+*   for i=0..j-1: temp -= A(i,j)*x(i)                              *
+*   if DIAG='N': temp /= A(j,j)                                    *
+*   x(j) = temp                                                    *
+* ============================================================= *
+*
+DTV@UT   DS    0H
+         L     R5,DTV@AB                  A col 0
+         L     R4,DTV@XB                  x(0) ptr
+         L     R2,DTV@N                   outer counter
+*
+DTV@TJL  DS    0H                          ---- J loop (U/T) ----
+         LD    FPR0,0(,R4)                temp = x(j)
+         L     R3,DTV@N
+         SR    R3,R2                       j = inner count
+         LTR   R3,R3
+         BZ    DTV@TLS
+         L     R6,DTV@XB                  x(0) ptr
+         LR    R11,R5                      A(0,j) ptr
+DTV@TIL  DS    0H
+         LD    FPR2,0(,R11)               A(i,j)
+         MDB   FPR2,0(,R6)                * x(i)
+         SDBR  FPR0,FPR2                  temp -= A(i,j)*x(i)
+         LA    R11,8(,R11)
+         AR    R6,R7
+         BCT   R3,DTV@TIL
+*
+DTV@TLS  DS    0H                          ---- Divide & store ----
+         CLI   DTV@DG,X'D5'
+         BNE   DTV@TST
+         L     R0,DTV@N
+         SR    R0,R2                       j
+         SLA   R0,3                        j*8
+         LR    R11,R5
+         AR    R11,R0                      A(j,j)
+         LD    FPR2,0(,R11)
+         DDBR  FPR0,FPR2
+DTV@TST  DS    0H
+         STD   FPR0,0(,R4)                x(j) = temp
+*
+         AR    R5,R8                       A col += LDA*8
+         AR    R4,R7                       x += INCX*8
+         BCT   R2,DTV@TJL
+         B     DTV@RT
+*
+* ============================================================= *
+* LOWER / TRANS: backward dot                                      *
+*                                                                 *
+* for j=N-1 downto 0:                                              *
+*   temp = x(j)                                                    *
+*   for i=j+1..N-1: temp -= A(i,j)*x(i)                            *
+*   if DIAG='N': temp /= A(j,j)                                    *
+*   x(j) = temp                                                    *
+* ============================================================= *
+*
+DTV@LT   DS    0H
+         L     R2,DTV@N
+* A col for j=N-1
+         L     R5,DTV@AB
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R5,R0
+* x(N-1)
+         L     R4,DTV@XB
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R7
+         AR    R4,R0
+*
+DTV@BJL  DS    0H                          ---- J loop (L/T) ----
+         LD    FPR0,0(,R4)                temp = x(j)
+         LR    R3,R2
+         BCTR  R3,0                        count = R2-1
+         LTR   R3,R3
+         BZ    DTV@BLS
+* x(j+1) ptr
+         LR    R6,R4
+         AR    R6,R7
+* A(j+1,j) ptr: j = N-R2, (j+1)*8
+         L     R0,DTV@N
+         SR    R0,R2                       j
+         LA    R0,1(,R0)                   j+1
+         SLA   R0,3                        (j+1)*8
+         LR    R11,R5
+         AR    R11,R0
+DTV@BIL  DS    0H
+         LD    FPR2,0(,R11)               A(i,j)
+         MDB   FPR2,0(,R6)                * x(i)
+         SDBR  FPR0,FPR2
+         LA    R11,8(,R11)
+         AR    R6,R7
+         BCT   R3,DTV@BIL
+*
+DTV@BLS  DS    0H                          ---- Divide & store ----
+         CLI   DTV@DG,X'D5'
+         BNE   DTV@BST
+         L     R0,DTV@N
+         SR    R0,R2
+         SLA   R0,3
+         LR    R11,R5
+         AR    R11,R0                      A(j,j)
+         LD    FPR2,0(,R11)
+         DDBR  FPR0,FPR2
+DTV@BST  DS    0H
+         STD   FPR0,0(,R4)
+*
+         SR    R5,R8                       A col -= LDA*8
+         SR    R4,R7                       x -= INCX*8
+         BCT   R2,DTV@BJL
+         B     DTV@RT
+*
+DTV@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+DTV@N    DS    F
+DTV@LDA  DS    F
+DTV@IX   DS    F
+         DS    0C
+DTV@UP   DS    C
+DTV@TR   DS    C
+DTV@DG   DS    C
+         DS    0D
+DTV@AB   DS    F
+DTV@XB   DS    F
+DTV@SL   DS    F
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   DTRSV

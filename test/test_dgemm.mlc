@@ -1,0 +1,14 @@
+*---------------------------------------------------------------------*
+* TEST_DGEMM - z390 test harness stub for DGEMM (Phase 3)            *
+*                                                                     *
+* Placeholder. Actual tests arrive with the DGEMM implementation.     *
+* For now, just prove the test harness loads.                         *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  epilog
+*
+TEST     PROLOG TSTDGEMM
+         WTO   'DGEMM test stub - not yet implemented'
+         EPILOG
+         LTORG
+         END   TSTDGEMM

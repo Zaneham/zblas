@@ -1,0 +1,128 @@
+*---------------------------------------------------------------------*
+* DCOPY -- Double-precision vector COPY                               *
+*                                                                     *
+* Computes: Y(i) = X(i)   for i = 1..N                               *
+*                                                                     *
+* OS linkage parm list (R1 -> address list):                          *
+*   +0  addr of N      (fullword integer)                             *
+*   +4  addr of DX     (float64 array)                                *
+*   +8  addr of INCX   (fullword integer)                             *
+*  +12  addr of DY     (float64 array)                                *
+*  +16  addr of INCY   (fullword integer, high bit set -- last parm)  *
+*                                                                     *
+* Return: nothing (Y receives copy of X).                             *
+*                                                                     *
+* The glamorous life of a byte-shuffling instruction sequence.        *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DCOPY
+*
+* ---- Load parameters ----
+*
+         LR    R11,R1
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   DCP@RT                      N <= 0 -> done
+*
+         L     R4,4(,R11)                  DX base
+         L     R5,8(,R11)                  Addr of INCX
+         L     R5,0(,R5)                   INCX
+         L     R6,12(,R11)                 DY base
+         L     R7,16(,R11)                 Addr of INCY
+         L     R7,0(,R7)                   INCY
+*
+* ---- Unit stride check ----
+*
+         CHI   R5,1
+         BNE   DCP@SC
+         CHI   R7,1
+         BNE   DCP@SC
+*
+* ---- Probe for Vector Facility ----
+*
+         VFTEST R0
+         BZ    DCP@SU
+*
+* ============================================================= *
+* VECTOR PATH -- unit stride, 16 bytes per iteration             *
+* ============================================================= *
+*
+         LR    R8,R2
+         SRL   R8,1                        Pairs
+         LTR   R8,R8
+         BZ    DCP@VR
+*
+DCP@VL   DS    0H
+         VL    V1,0(,R4)
+         VST   V1,0(,R6)
+         LA    R4,16(,R4)
+         LA    R6,16(,R6)
+         BCT   R8,DCP@VL
+*
+DCP@VR   DS    0H
+         TML   R2,X'0001'
+         BZ    DCP@RT
+         LD    FPR2,0(,R4)
+         STD   FPR2,0(,R6)
+         B     DCP@RT
+*
+* ============================================================= *
+* SCALAR PATH (unit stride)                                      *
+* ============================================================= *
+*
+DCP@SU   DS    0H
+         LA    R5,8
+         LA    R7,8
+         B     DCP@SL
+*
+* ============================================================= *
+* SCALAR PATH (general)                                          *
+* ============================================================= *
+*
+DCP@SC   DS    0H
+         SLA   R5,3
+         SLA   R7,3
+*
+         LTR   R5,R5
+         BNM   DCP@AY
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R5
+         LCR   R0,R0
+         AR    R4,R0
+*
+DCP@AY   DS    0H
+         LTR   R7,R7
+         BNM   DCP@SL
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R7
+         LCR   R0,R0
+         AR    R6,R0
+*
+DCP@SL   DS    0H
+         LR    R8,R2
+*
+DCP@S1   DS    0H
+         LD    FPR2,0(,R4)
+         STD   FPR2,0(,R6)
+         AR    R4,R5
+         AR    R6,R7
+         BCT   R8,DCP@S1
+*
+* ============================================================= *
+* RETURN                                                         *
+* ============================================================= *
+*
+DCP@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   DCOPY

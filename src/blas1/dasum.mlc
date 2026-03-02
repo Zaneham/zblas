@@ -1,0 +1,122 @@
+*---------------------------------------------------------------------*
+* DASUM -- Double-precision Absolute SUM                              *
+*                                                                     *
+* Computes: result = sum( |X(i)| )  for i = 1..N                     *
+*                                                                     *
+* OS linkage parm list (R1 -> address list):                          *
+*   +0  addr of N      (fullword integer)                             *
+*   +4  addr of DX     (float64 array)                                *
+*   +8  addr of INCX   (fullword integer, high bit set -- last parm)  *
+*                                                                     *
+* Return: absolute sum in FPR0.                                       *
+*                                                                     *
+* VF path uses VFPSO (flip sign) to absolute, then VFA to sum.       *
+* Scalar uses LPDBR because we are civilised.                         *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DASUM
+*
+* ---- Zero the accumulator ----
+*
+         SDBR  FPR0,FPR0                   FPR0 = 0.0
+*
+* ---- Load parameters ----
+*
+         LR    R11,R1
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   DAS@RT                      N <= 0 -> return 0
+*
+         L     R4,4(,R11)                  DX base
+         L     R5,8(,R11)                  Addr of INCX
+         L     R5,0(,R5)                   INCX
+*
+* ---- Unit stride check ----
+*
+         CHI   R5,1
+         BNE   DAS@SC
+*
+* ---- Probe for Vector Facility ----
+*
+         VFTEST R0
+         BZ    DAS@SU
+*
+* ============================================================= *
+* VECTOR PATH -- unit stride                                     *
+*                                                                *
+* VFLPDB (VFPSO with sign=abs) each pair, then VFA to accum.    *
+* V0 = accumulator, V1 = X pair, V2 = |X| pair                  *
+* ============================================================= *
+*
+         VGBM  V0,0                        V0 = 0
+         LR    R8,R2
+         SRL   R8,1
+         LTR   R8,R8
+         BZ    DAS@VR
+*
+DAS@VL   DS    0H
+         VL    V1,0(,R4)
+         VFLPDB V2,V1                      V2 = |V1| (abs each lane)
+         VFA   V0,V0,V2,3,0               Accumulate
+         LA    R4,16(,R4)
+         BCT   R8,DAS@VL
+*
+         VHSUM V0                          V0[0] += V0[1] -> FPR0
+*
+DAS@VR   DS    0H
+         TML   R2,X'0001'
+         BZ    DAS@RT
+         LD    FPR2,0(,R4)
+         LPDBR FPR2,FPR2                   |X|
+         ADBR  FPR0,FPR2
+         B     DAS@RT
+*
+* ============================================================= *
+* SCALAR PATH (unit stride)                                      *
+* ============================================================= *
+*
+DAS@SU   DS    0H
+         LA    R5,8
+         B     DAS@SL
+*
+* ============================================================= *
+* SCALAR PATH (general)                                          *
+* ============================================================= *
+*
+DAS@SC   DS    0H
+         SLA   R5,3
+*
+         LTR   R5,R5
+         BNM   DAS@SL
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R5
+         LCR   R0,R0
+         AR    R4,R0
+*
+DAS@SL   DS    0H
+         LR    R8,R2
+*
+DAS@S1   DS    0H
+         LD    FPR2,0(,R4)
+         LPDBR FPR2,FPR2                   FPR2 = |X(i)|
+         ADBR  FPR0,FPR2                   FPR0 += |X(i)|
+         AR    R4,R5
+         BCT   R8,DAS@S1
+*
+* ============================================================= *
+* RETURN -- result in FPR0                                       *
+* ============================================================= *
+*
+DAS@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   DASUM

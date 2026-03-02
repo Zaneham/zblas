@@ -1,0 +1,687 @@
+*---------------------------------------------------------------------*
+* Z390_DSYRK - Self-contained z390 test for DSYRK scalar path.       *
+* Two CSECTs: test harness + scalar DSYRK. No VF, no STFLE.          *
+* All doubles are IEEE 754 BFP (DC X'...'). 2x2 matrices.            *
+*                                                                     *
+* C := alpha*A*A' + beta*C (TRANS='N'). Only updates one triangle.   *
+* Paints half the matrix and leaves the rest to your imagination.     *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+* ---- TEST HARNESS ----
+*
+TSTDSYRK CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING TSTDSYRK,R12
+         LA    R10,TSAVE
+         ST    R13,4(,R10)
+         ST    R10,8(,R13)
+         LR    R13,R10
+*
+         WTO   'ZBLAS DSYRK z390 test'
+*
+* ============================================================= *
+* TEST 1: Upper, N, alpha=1, beta=0                              *
+* A=[1,2,3,4] col-major 2x2. A*A' upper only.                    *
+* C(0,0)=10, C(0,1)=14, C(1,1)=20. C(1,0) untouched.            *
+* C_init=[99,99,99,99]. Expected: [10, 99, 14, 20]               *
+* ============================================================= *
+*
+         WTO   'T1: U,N a=1 b=0'
+         MVC   T1C(32),T1CINI
+         LA    R1,T1PL
+         L     R15,=A(DSYRK)
+         BALR  R14,R15
+         LD    0,T1C
+         CDB   0,T1E1
+         BE    T1P1
+         WTO   'FAIL C11!=10'
+         B     T1C2
+T1P1     WTO   'PASS C11=10'
+T1C2     DS    0H
+         LD    0,T1C+8
+         CDB   0,T1E2
+         BE    T1P2
+         WTO   'FAIL C21!=99'
+         B     T1C3
+T1P2     WTO   'PASS C21=99'
+T1C3     DS    0H
+         LD    0,T1C+16
+         CDB   0,T1E3
+         BE    T1P3
+         WTO   'FAIL C12!=14'
+         B     T1C4
+T1P3     WTO   'PASS C12=14'
+T1C4     DS    0H
+         LD    0,T1C+24
+         CDB   0,T1E4
+         BE    T1P4
+         WTO   'FAIL C22!=20'
+         B     TST2
+T1P4     WTO   'PASS C22=20'
+*
+* ============================================================= *
+* TEST 2: Lower, N, alpha=1, beta=0                              *
+* Same A. C(0,0)=10, C(1,0)=14, C(1,1)=20. C(0,1) untouched.    *
+* C_init=[99,99,99,99]. Expected: [10, 14, 99, 20]               *
+* ============================================================= *
+*
+TST2     DS    0H
+         WTO   'T2: L,N a=1 b=0'
+         MVC   T2C(32),T2CINI
+         LA    R1,T2PL
+         L     R15,=A(DSYRK)
+         BALR  R14,R15
+         LD    0,T2C
+         CDB   0,T2E1
+         BE    T2P1
+         WTO   'FAIL C11!=10'
+         B     T2K2
+T2P1     WTO   'PASS C11=10'
+T2K2     DS    0H
+         LD    0,T2C+8
+         CDB   0,T2E2
+         BE    T2P2
+         WTO   'FAIL C21!=14'
+         B     T2K3
+T2P2     WTO   'PASS C21=14'
+T2K3     DS    0H
+         LD    0,T2C+16
+         CDB   0,T2E3
+         BE    T2P3
+         WTO   'FAIL C12!=99'
+         B     T2K4
+T2P3     WTO   'PASS C12=99'
+T2K4     DS    0H
+         LD    0,T2C+24
+         CDB   0,T2E4
+         BE    T2P4
+         WTO   'FAIL C22!=20'
+         B     TST3
+T2P4     WTO   'PASS C22=20'
+*
+* ============================================================= *
+* TEST 3: Upper, alpha=0, beta=2 - scale upper triangle only     *
+* C_init=[1,1,3,4]. Expected: [2, 1, 6, 8]                       *
+* Upper: C(0,0)=2, C(0,1)=6, C(1,1)=8. C(1,0)=1 untouched.      *
+* ============================================================= *
+*
+TST3     DS    0H
+         WTO   'T3: U a=0 b=2'
+         MVC   T3C(32),T3CINI
+         LA    R1,T3PL
+         L     R15,=A(DSYRK)
+         BALR  R14,R15
+         LD    0,T3C
+         CDB   0,T3E1
+         BE    T3P1
+         WTO   'FAIL C11!=2'
+         B     T3K2
+T3P1     WTO   'PASS C11=2'
+T3K2     DS    0H
+         LD    0,T3C+8
+         CDB   0,T3E2
+         BE    T3P2
+         WTO   'FAIL C21!=1'
+         B     T3K3
+T3P2     WTO   'PASS C21=1'
+T3K3     DS    0H
+         LD    0,T3C+16
+         CDB   0,T3E3
+         BE    T3P3
+         WTO   'FAIL C12!=6'
+         B     T3K4
+T3P3     WTO   'PASS C12=6'
+T3K4     DS    0H
+         LD    0,T3C+24
+         CDB   0,T3E4
+         BE    T3P4
+         WTO   'FAIL C22!=8'
+         B     TST4
+T3P4     WTO   'PASS C22=8'
+*
+* ============================================================= *
+* TEST 4: N=0, quick return (no crash)                           *
+* ============================================================= *
+*
+TST4     DS    0H
+         WTO   'T4: N=0'
+         LA    R1,T4PL
+         L     R15,=A(DSYRK)
+         BALR  R14,R15
+         WTO   'PASS N=0'
+*
+* ---- DONE ----
+*
+         WTO   'DSYRK: ALL TESTS DONE'
+         L     R13,4(,R13)
+         LM    R14,R12,12(R13)
+         SR    R15,R15
+         BR    R14
+*
+* ---- Test data ----
+*
+TSAVE    DS    18F
+*
+* ---- Common A matrix ----
+*
+         DS    0D
+COMA     DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+*
+* ---- Test 1: Upper, N, alpha=1, beta=0 ----
+*
+         DS    0D
+T1UP     DC    X'E4'                       'U'
+T1TR     DC    X'D5'                       'N'
+         DS    0F
+T1N      DC    F'2'
+T1K      DC    F'2'
+         DS    0D
+T1ALP    DC    X'3FF0000000000000'         1.0
+T1LDA    DC    F'2'
+         DS    0D
+T1BET    DC    X'0000000000000000'         0.0
+T1C      DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+T1LDC    DC    F'2'
+T1CINI   DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DS    0D
+T1E1     DC    X'4024000000000000'         10.0
+T1E2     DC    X'4058C00000000000'         99.0 (untouched)
+T1E3     DC    X'402C000000000000'         14.0
+T1E4     DC    X'4034000000000000'         20.0
+T1PL     DC    A(T1UP,T1TR,T1N,T1K,T1ALP,COMA,T1LDA,T1BET,T1C)
+         DC    X'80',AL3(T1LDC)
+*
+* ---- Test 2: Lower, N, alpha=1, beta=0 ----
+*
+         DS    0D
+T2UP     DC    X'D3'                       'L'
+T2TR     DC    X'D5'                       'N'
+         DS    0F
+T2N      DC    F'2'
+T2K      DC    F'2'
+         DS    0D
+T2ALP    DC    X'3FF0000000000000'         1.0
+T2LDA    DC    F'2'
+         DS    0D
+T2BET    DC    X'0000000000000000'         0.0
+T2C      DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+T2LDC    DC    F'2'
+T2CINI   DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DC    X'4058C00000000000'         99.0
+         DS    0D
+T2E1     DC    X'4024000000000000'         10.0
+T2E2     DC    X'402C000000000000'         14.0
+T2E3     DC    X'4058C00000000000'         99.0 (untouched)
+T2E4     DC    X'4034000000000000'         20.0
+T2PL     DC    A(T2UP,T2TR,T2N,T2K,T2ALP,COMA,T2LDA,T2BET,T2C)
+         DC    X'80',AL3(T2LDC)
+*
+* ---- Test 3: Upper, alpha=0, beta=2 ----
+*
+         DS    0D
+T3UP     DC    X'E4'                       'U'
+T3TR     DC    X'D5'                       'N'
+         DS    0F
+T3N      DC    F'2'
+T3K      DC    F'2'
+         DS    0D
+T3ALP    DC    X'0000000000000000'         0.0
+T3LDA    DC    F'2'
+         DS    0D
+T3BET    DC    X'4000000000000000'         2.0
+T3C      DC    X'3FF0000000000000'         1.0
+         DC    X'3FF0000000000000'         1.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+T3LDC    DC    F'2'
+T3CINI   DC    X'3FF0000000000000'         1.0
+         DC    X'3FF0000000000000'         1.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4010000000000000'         4.0
+         DS    0D
+T3E1     DC    X'4000000000000000'         2.0
+T3E2     DC    X'3FF0000000000000'         1.0 (untouched)
+T3E3     DC    X'4018000000000000'         6.0
+T3E4     DC    X'4020000000000000'         8.0
+T3PL     DC    A(T3UP,T3TR,T3N,T3K,T3ALP,COMA,T3LDA,T3BET,T3C)
+         DC    X'80',AL3(T3LDC)
+*
+* ---- Test 4: N=0 (quick return) ----
+*
+         DS    0D
+T4UP     DC    X'E4'
+T4TR     DC    X'D5'
+         DS    0F
+T4N      DC    F'0'
+T4K      DC    F'2'
+         DS    0D
+T4ALP    DC    X'3FF0000000000000'         1.0
+T4LDA    DC    F'2'
+         DS    0D
+T4BET    DC    X'3FF0000000000000'         1.0
+T4C      DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+T4LDC    DC    F'2'
+T4PL     DC    A(T4UP,T4TR,T4N,T4K,T4ALP,COMA,T4LDA,T4BET,T4C)
+         DC    X'80',AL3(T4LDC)
+*
+         LTORG
+         DROP  R12
+*
+* ============================================================= *
+* DSYRK - scalar only (no VF, no STFLE, z390 safe)              *
+* C := alpha*A*A' + beta*C (TRANS='N')                           *
+*   or alpha*A'*A + beta*C (TRANS='T')                           *
+*                                                                 *
+* 10 parms via OS linkage. Only updates specified triangle.       *
+* ============================================================= *
+*
+DSYRK    CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING DSYRK,R12
+         LR    R11,R1
+*
+* ---- Extract parameters ----
+*
+         L     R1,0(,R11)
+         MVC   DSK@UP(1),0(R1)
+         L     R1,4(,R11)
+         MVC   DSK@TR(1),0(R1)
+*
+         L     R1,8(,R11)
+         L     R1,0(,R1)
+         ST    R1,DSK@N
+         L     R1,12(,R11)
+         L     R1,0(,R1)
+         ST    R1,DSK@K
+*
+         L     R1,16(,R11)
+         LD    0,0(,R1)
+         STD   0,DSK@ALP
+*
+         L     R1,20(,R11)
+         ST    R1,DSK@AB
+         L     R1,24(,R11)
+         L     R1,0(,R1)
+         ST    R1,DSK@LDA
+*
+         L     R1,28(,R11)
+         LD    4,0(,R1)
+         STD   4,DSK@BET
+*
+         L     R1,32(,R11)
+         ST    R1,DSK@CB
+         L     R1,36(,R11)
+         N     R1,=X'7FFFFFFF'
+         L     R1,0(,R1)
+         ST    R1,DSK@LDC
+*
+* ---- Quick return: N <= 0 ----
+*
+         L     R0,DSK@N
+         LTR   R0,R0
+         BNP   DSK@RT
+*
+* ---- Quick return: alpha=0, beta=1 ----
+*
+         LD    0,DSK@ALP
+         LTDBR 0,0
+         BNZ   DSK@NZ
+         LD    4,DSK@BET
+         LD    6,DSK@1
+         CDBR  4,6
+         BE    DSK@RT
+DSK@NZ   DS    0H
+*
+* ---- Byte strides ----
+*
+         L     R8,DSK@LDA
+         SLA   R8,3
+         L     R10,DSK@LDC
+         SLA   R10,3
+*
+* ---- Dispatch ----
+*
+         CLI   DSK@TR,X'D5'
+         BNE   DSK@TX
+         CLI   DSK@UP,X'E4'
+         BE    DSK@UN
+         B     DSK@LN
+DSK@TX   DS    0H
+         CLI   DSK@UP,X'E4'
+         BE    DSK@UT
+         B     DSK@LT
+*
+* ---- UPPER / NO-TRANS: DAXPY form ----
+*
+DSK@UN   DS    0H
+         LD    0,DSK@ALP
+         LD    4,DSK@BET
+         L     R5,DSK@CB
+         SR    R2,R2
+*
+DSK@UJL  DS    0H
+         LR    R4,R2
+         LA    R4,1(,R4)
+         LTDBR 4,4
+         BZ    DSK@UBZ
+         LD    6,DSK@1
+         CDBR  4,6
+         BE    DSK@UB1
+         LR    R6,R5
+         LR    R3,R4
+DSK@UBS  DS    0H
+         LD    2,0(,R6)
+         MDBR  2,4
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R3,DSK@UBS
+         B     DSK@UB1
+DSK@UBZ  DS    0H
+         LR    R6,R5
+         SDBR  2,2
+         LR    R3,R4
+DSK@UZ1  DS    0H
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R3,DSK@UZ1
+*
+DSK@UB1  DS    0H
+         LD    0,DSK@ALP
+         LTDBR 0,0
+         BZ    DSK@UJN
+         L     R6,DSK@AB
+         L     R3,DSK@K
+         LTR   R3,R3
+         BNP   DSK@UJN
+*
+DSK@ULL  DS    0H
+         LR    R0,R2
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    2,0(,R11)
+         MDBR  2,0
+         LTDBR 2,2
+         BZ    DSK@ULX
+         ST    R3,DSK@SL
+         LR    R11,R5
+         LR    R3,R6
+         LR    R4,R2
+         LA    R4,1(,R4)
+DSK@UIL  DS    0H
+         LD    6,0(,R3)
+         MDBR  6,2
+         ADB   6,0(,R11)
+         STD   6,0(,R11)
+         LA    R3,8(,R3)
+         LA    R11,8(,R11)
+         BCT   R4,DSK@UIL
+         L     R3,DSK@SL
+*
+DSK@ULX  DS    0H
+         AR    R6,R8
+         BCT   R3,DSK@ULL
+*
+DSK@UJN  DS    0H
+         AR    R5,R10
+         LA    R2,1(,R2)
+         C     R2,DSK@N
+         BL    DSK@UJL
+         B     DSK@RT
+*
+* ---- LOWER / NO-TRANS: DAXPY form, lower triangle ----
+*
+DSK@LN   DS    0H
+         LD    0,DSK@ALP
+         LD    4,DSK@BET
+         L     R5,DSK@CB
+         SR    R2,R2
+*
+DSK@LJL  DS    0H
+         L     R4,DSK@N
+         SR    R4,R2
+         LR    R0,R2
+         SLA   R0,3
+         LTDBR 4,4
+         BZ    DSK@LBZ
+         LD    6,DSK@1
+         CDBR  4,6
+         BE    DSK@LB1
+         LR    R6,R5
+         AR    R6,R0
+         LR    R3,R4
+DSK@LBS  DS    0H
+         LD    2,0(,R6)
+         MDBR  2,4
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R3,DSK@LBS
+         B     DSK@LB1
+DSK@LBZ  DS    0H
+         LR    R6,R5
+         AR    R6,R0
+         SDBR  2,2
+         LR    R3,R4
+DSK@LZ1  DS    0H
+         STD   2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R3,DSK@LZ1
+*
+DSK@LB1  DS    0H
+         LD    0,DSK@ALP
+         LTDBR 0,0
+         BZ    DSK@LJN
+         L     R6,DSK@AB
+         L     R3,DSK@K
+         LTR   R3,R3
+         BNP   DSK@LJN
+*
+DSK@LLL  DS    0H
+         LR    R0,R2
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    2,0(,R11)
+         MDBR  2,0
+         LTDBR 2,2
+         BZ    DSK@LLX
+         ST    R3,DSK@SL
+         LR    R11,R5
+         LR    R0,R2
+         SLA   R0,3
+         AR    R11,R0
+         LR    R3,R6
+         LR    R0,R2
+         SLA   R0,3
+         AR    R3,R0
+         L     R4,DSK@N
+         SR    R4,R2
+DSK@LIL  DS    0H
+         LD    6,0(,R3)
+         MDBR  6,2
+         ADB   6,0(,R11)
+         STD   6,0(,R11)
+         LA    R3,8(,R3)
+         LA    R11,8(,R11)
+         BCT   R4,DSK@LIL
+         L     R3,DSK@SL
+*
+DSK@LLX  DS    0H
+         AR    R6,R8
+         BCT   R3,DSK@LLL
+*
+DSK@LJN  DS    0H
+         AR    R5,R10
+         LA    R2,1(,R2)
+         C     R2,DSK@N
+         BL    DSK@LJL
+         B     DSK@RT
+*
+* ---- UPPER / TRANS: dot-product form ----
+*
+DSK@UT   DS    0H
+         LD    0,DSK@ALP
+         LD    4,DSK@BET
+         L     R5,DSK@CB
+         L     R7,DSK@AB
+         SR    R2,R2
+*
+DSK@TJL  DS    0H
+         L     R6,DSK@AB
+         LR    R11,R5
+         LR    R4,R2
+         LA    R4,1(,R4)
+*
+DSK@TIL  DS    0H
+         SDBR  2,2
+         ST    R4,DSK@SL
+         LR    R3,R6
+         LR    R1,R7
+         L     R4,DSK@K
+         LTR   R4,R4
+         BNP   DSK@TLS
+*
+DSK@TLL  DS    0H
+         LD    6,0(,R3)
+         MDB   6,0(,R1)
+         ADBR  2,6
+         LA    R3,8(,R3)
+         LA    R1,8(,R1)
+         BCT   R4,DSK@TLL
+*
+DSK@TLS  DS    0H
+         MDBR  2,0
+         LTDBR 4,4
+         BZ    DSK@TST
+         LD    6,0(,R11)
+         MDBR  6,4
+         ADBR  2,6
+DSK@TST  DS    0H
+         STD   2,0(,R11)
+         L     R4,DSK@SL
+         LA    R11,8(,R11)
+         AR    R6,R8
+         BCT   R4,DSK@TIL
+*
+         AR    R5,R10
+         AR    R7,R8
+         LA    R2,1(,R2)
+         C     R2,DSK@N
+         BL    DSK@TJL
+         B     DSK@RT
+*
+* ---- LOWER / TRANS: dot-product form, lower triangle ----
+*
+DSK@LT   DS    0H
+         LD    0,DSK@ALP
+         LD    4,DSK@BET
+         L     R5,DSK@CB
+         L     R7,DSK@AB
+         SR    R2,R2
+*
+DSK@BJL  DS    0H
+         LR    R6,R7
+         LR    R11,R5
+         LR    R0,R2
+         SLA   R0,3
+         AR    R11,R0
+         L     R4,DSK@N
+         SR    R4,R2
+*
+DSK@BIL  DS    0H
+         SDBR  2,2
+         ST    R4,DSK@SL
+         LR    R3,R6
+         LR    R1,R7
+         L     R4,DSK@K
+         LTR   R4,R4
+         BNP   DSK@BLS
+*
+DSK@BLL  DS    0H
+         LD    6,0(,R3)
+         MDB   6,0(,R1)
+         ADBR  2,6
+         LA    R3,8(,R3)
+         LA    R1,8(,R1)
+         BCT   R4,DSK@BLL
+*
+DSK@BLS  DS    0H
+         MDBR  2,0
+         LTDBR 4,4
+         BZ    DSK@BST
+         LD    6,0(,R11)
+         MDBR  6,4
+         ADBR  2,6
+DSK@BST  DS    0H
+         STD   2,0(,R11)
+         L     R4,DSK@SL
+         LA    R11,8(,R11)
+         AR    R6,R8
+         BCT   R4,DSK@BIL
+*
+         AR    R5,R10
+         AR    R7,R8
+         LA    R2,1(,R2)
+         C     R2,DSK@N
+         BL    DSK@BJL
+         B     DSK@RT
+*
+DSK@RT   DS    0H
+         LM    R14,R12,12(R13)
+         BR    R14
+*
+* ---- Local storage ----
+*
+         DS    0D
+DSK@N    DS    F
+DSK@K    DS    F
+DSK@LDA  DS    F
+DSK@LDC  DS    F
+         DS    0C
+DSK@UP   DS    C
+DSK@TR   DS    C
+         DS    0D
+DSK@ALP  DS    D
+DSK@BET  DS    D
+DSK@AB   DS    F
+DSK@CB   DS    F
+DSK@SL   DS    F
+         DS    0D
+DSK@1    DC    X'3FF0000000000000'
+         LTORG
+         END   TSTDSYRK

@@ -1,0 +1,46 @@
+.*
+.* zblas — prolog.mac
+.* Standard OS linkage prologue for leaf BLAS routines.
+.*
+.* Usage:  PROLOG &NAME
+.*
+.* Saves R14-R12 into caller's save area, establishes R12 base.
+.* BLAS kernels are leaf routines — no GETMAIN, no SA chaining.
+.* If you need to call out, you've made a terrible life choice.
+.*
+         MACRO
+&LBL     PROLOG &NAME
+&LBL     CSECT
+&NAME    DS    0H
+         USING &NAME,R15
+         B     ZB@&NAME-&NAME.(,R15)       Branch past eyecatcher
+         DC    AL1(L'ZBE@&NAME)            Length byte
+ZBE@&NAME DC   C'&NAME'                    Eyecatcher
+         DC    C' zblas'
+         DS    0H                          Halfword-align
+ZB@&NAME DS    0H
+         DROP  R15
+         STM   R14,R12,12(R13)             Save caller's registers
+         LR    R12,R15                     Establish base
+         USING &NAME,R12
+         MEND
+.*
+.* ---- Register Equates ----
+.* Like death, taxes, and COBOL, these never change.
+.*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15

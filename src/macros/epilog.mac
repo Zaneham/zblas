@@ -1,0 +1,16 @@
+.*
+.* zblas — epilog.mac
+.* Standard OS linkage epilogue for leaf BLAS routines.
+.*
+.* Usage:  EPILOG
+.*
+.* Restores R14-R12 from caller's save area and returns.
+.* Float results already in FPR0. Integer results in R15.
+.* No storage to free. We are leaf. We are simple. We are content.
+.*
+         MACRO
+&LBL     EPILOG
+&LBL     DS    0H
+         LM    R14,R12,12(R13)             Restore all registers
+         BR    R14                         Return to caller
+         MEND

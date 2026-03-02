@@ -1,0 +1,781 @@
+*---------------------------------------------------------------------*
+* DTRSM - Double-precision TRiangular Solve (Matrix)                  *
+*                                                                     *
+* op(A)*X = alpha*B (SIDE='L') or X*op(A) = alpha*B (SIDE='R')       *
+* B overwritten with solution. All 8 cases: {L,R} x {U,L} x {N,T}.  *
+*                                                                     *
+* OS linkage (R1 -> addr list, 11 parms):                             *
+*   +0  SIDE (char) +4 UPLO (char) +8 TRANSA (char) +12 DIAG (char)  *
+*  +16  M (F)      +20 N (F)      +24 ALPHA (D)     +28 A (array)    *
+*  +32  LDA (F)    +36 B (array)  +40 LDB (F, 0x80)                  *
+*                                                                     *
+* Scalar only. Not reentrant.                                         *
+* If this code had a flavour it would be burnt toast.                 *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DTRSM
+*
+* ---- Extract parameters ----
+*
+         LR    R11,R1
+*
+         L     R1,0(,R11)
+         MVC   DTM@SD(1),0(R1)            SIDE
+         L     R1,4(,R11)
+         MVC   DTM@UP(1),0(R1)            UPLO
+         L     R1,8(,R11)
+         MVC   DTM@TR(1),0(R1)            TRANSA
+         L     R1,12(,R11)
+         MVC   DTM@DG(1),0(R1)            DIAG
+*
+         L     R1,16(,R11)
+         L     R1,0(,R1)
+         ST    R1,DTM@M
+         L     R1,20(,R11)
+         L     R1,0(,R1)
+         ST    R1,DTM@N
+*
+         L     R1,24(,R11)
+         LD    FPR0,0(,R1)
+         STD   FPR0,DTM@ALP
+*
+         L     R1,28(,R11)
+         ST    R1,DTM@AB
+         L     R1,32(,R11)
+         L     R1,0(,R1)
+         ST    R1,DTM@LDA
+*
+         L     R1,36(,R11)
+         ST    R1,DTM@BB
+         L     R1,40(,R11)
+         N     R1,=X'7FFFFFFF'
+         L     R1,0(,R1)
+         ST    R1,DTM@LDB
+*
+* ---- Quick return ----
+*
+         L     R0,DTM@M
+         LTR   R0,R0
+         BNP   DTM@RT
+         L     R0,DTM@N
+         LTR   R0,R0
+         BNP   DTM@RT
+*
+* ---- Byte strides ----
+*
+         L     R8,DTM@LDA
+         SLA   R8,3                        LDA*8
+         L     R9,DTM@LDB
+         SLA   R9,3                        LDB*8
+*
+* ---- Alpha == 0: zero all of B ----
+*
+         LD    FPR0,DTM@ALP
+         LTDBR FPR0,FPR0
+         BNZ   DTM@GO
+         L     R5,DTM@BB
+         L     R2,DTM@N
+         SDBR  FPR2,FPR2
+DTM@AZ   DS    0H
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@A1   DS    0H
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@A1
+         AR    R5,R9
+         BCT   R2,DTM@AZ
+         B     DTM@RT
+*
+* ---- Dispatch: {L,R} x {U,L} x {N,T} ----
+*
+DTM@GO   DS    0H
+         CLI   DTM@SD,X'D3'               SIDE='L'?
+         BNE   DTM@RS                      Right side
+* Left side
+         CLI   DTM@TR,X'D5'               TRANS='N'?
+         BNE   DTM@LT
+         CLI   DTM@UP,X'E4'               UPLO='U'?
+         BE    DTM@LU
+         B     DTM@LL
+DTM@LT   DS    0H
+         CLI   DTM@UP,X'E4'
+         BE    DTM@UT
+         B     DTM@LLT
+* Right side
+DTM@RS   DS    0H
+         CLI   DTM@TR,X'D5'
+         BNE   DTM@RT2
+         CLI   DTM@UP,X'E4'
+         BE    DTM@RU
+         B     DTM@RL
+DTM@RT2  DS    0H
+         CLI   DTM@UP,X'E4'
+         BE    DTM@RUT
+         B     DTM@RLT
+*
+* ============================================================= *
+* LEFT / UPPER / NO-TRANS: back sub per B column                   *
+* ============================================================= *
+*
+DTM@LU   DS    0H
+         L     R5,DTM@BB                  B col ptr
+         L     R2,DTM@N                   j counter
+*
+DTM@J1   DS    0H                          ---- J loop ----
+* Scale B(:,j) by alpha
+         LD    FPR6,DTM@1
+         LD    FPR0,DTM@ALP
+         CDBR  FPR0,FPR6
+         BE    DTM@S1
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@C1   DS    0H
+         LD    FPR2,0(,R6)
+         MDBR  FPR2,FPR0
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@C1
+DTM@S1   DS    0H
+* K loop: k=M-1 downto 0
+* Set up A col for k=M-1, B(k,j) ptr
+         L     R6,DTM@AB
+         L     R0,DTM@M
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R6,R0                       A col M-1
+         LR    R4,R5
+         L     R0,DTM@M
+         BCTR  R0,0
+         SLA   R0,3
+         AR    R4,R0                       B(M-1,j)
+         L     R3,DTM@M
+*
+DTM@K1   DS    0H                          ---- K loop ----
+         LD    FPR2,0(,R4)                B(k,j)
+         LTDBR FPR2,FPR2
+         BZ    DTM@N1
+* Divide by diagonal
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@D1
+         LR    R0,R3
+         BCTR  R0,0                        k
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0                      A(k,k)
+         LD    FPR6,0(,R11)
+         DDBR  FPR2,FPR6
+         STD   FPR2,0(,R4)
+DTM@D1   DS    0H
+* Inner: B(i,j) -= B(k,j)*A(i,k) for i=0..k-1
+         LR    R15,R3
+         BCTR  R15,0                       count = k
+         LTR   R15,R15
+         BZ    DTM@N1
+         LR    R7,R5                       B(0,j)
+         LR    R11,R6                      A(0,k)
+DTM@I1   DS    0H
+         LD    FPR6,0(,R11)               A(i,k)
+         MDBR  FPR6,FPR2                  B(k,j)*A(i,k)
+         LD    FPR4,0(,R7)                B(i,j)
+         SDBR  FPR4,FPR6
+         STD   FPR4,0(,R7)
+         LA    R11,8(,R11)
+         LA    R7,8(,R7)
+         BCT   R15,DTM@I1
+*
+DTM@N1   DS    0H                          ---- advance K ----
+         SR    R6,R8                       A col -= LDA*8
+         L     R0,=F'8'
+         SR    R4,R0                       B(k,j) -= 8
+         BCT   R3,DTM@K1
+*
+         AR    R5,R9                       B col += LDB*8
+         BCT   R2,DTM@J1
+         B     DTM@RT
+*
+* ============================================================= *
+* LEFT / LOWER / NO-TRANS: forward sub per B column                *
+* ============================================================= *
+*
+DTM@LL   DS    0H
+         L     R5,DTM@BB
+         L     R2,DTM@N
+*
+DTM@J2   DS    0H
+         LD    FPR6,DTM@1
+         LD    FPR0,DTM@ALP
+         CDBR  FPR0,FPR6
+         BE    DTM@S2
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@C2   DS    0H
+         LD    FPR2,0(,R6)
+         MDBR  FPR2,FPR0
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@C2
+DTM@S2   DS    0H
+* K loop: k=0..M-1
+         L     R6,DTM@AB                  A col 0
+         LR    R4,R5                       B(0,j)
+         L     R3,DTM@M
+*
+DTM@K2   DS    0H
+         LD    FPR2,0(,R4)                B(k,j)
+         LTDBR FPR2,FPR2
+         BZ    DTM@N2
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@D2
+         L     R0,DTM@M
+         SR    R0,R3                       k
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0                      A(k,k)
+         LD    FPR6,0(,R11)
+         DDBR  FPR2,FPR6
+         STD   FPR2,0(,R4)
+DTM@D2   DS    0H
+* Inner: B(i,j) -= B(k,j)*A(i,k) for i=k+1..M-1
+         LR    R15,R3
+         BCTR  R15,0                       count = R3-1
+         LTR   R15,R15
+         BZ    DTM@N2
+         LR    R7,R4
+         LA    R7,8(,R7)                   B(k+1,j)
+         L     R0,DTM@M
+         SR    R0,R3
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LA    R11,8(,R11)                 A(k+1,k)
+DTM@I2   DS    0H
+         LD    FPR6,0(,R11)
+         MDBR  FPR6,FPR2
+         LD    FPR4,0(,R7)
+         SDBR  FPR4,FPR6
+         STD   FPR4,0(,R7)
+         LA    R11,8(,R11)
+         LA    R7,8(,R7)
+         BCT   R15,DTM@I2
+*
+DTM@N2   DS    0H
+         AR    R6,R8                       A col += LDA*8
+         LA    R4,8(,R4)                   B(k,j) += 8
+         BCT   R3,DTM@K2
+*
+         AR    R5,R9
+         BCT   R2,DTM@J2
+         B     DTM@RT
+*
+* ============================================================= *
+* LEFT / UPPER / TRANS                                             *
+* ============================================================= *
+*
+DTM@UT   DS    0H
+         L     R5,DTM@BB
+         L     R2,DTM@N
+*
+DTM@J3   DS    0H
+         LR    R7,R5                       B(0,j)
+         L     R6,DTM@AB                  A col 0
+         L     R3,DTM@M                   i counter
+*
+DTM@I3   DS    0H                          ---- I loop ----
+         LD    FPR0,DTM@ALP
+         LD    FPR2,0(,R7)                B(i,j)
+         MDBR  FPR2,FPR0                  alpha * B(i,j)
+* Inner: temp -= A(k,i)*B(k,j) for k=0..i-1
+* i = M-R3 (0-based), count = i
+         L     R15,DTM@M
+         SR    R15,R3                      i
+         LTR   R15,R15
+         BZ    DTM@P3
+         ST    R3,DTM@SL
+         LR    R11,R6                      A(0,i)
+         LR    R3,R5                       B(0,j)
+DTM@L3   DS    0H
+         LD    FPR6,0(,R11)               A(k,i)
+         MDB   FPR6,0(,R3)                * B(k,j)
+         SDBR  FPR2,FPR6
+         LA    R11,8(,R11)
+         LA    R3,8(,R3)
+         BCT   R15,DTM@L3
+         L     R3,DTM@SL
+DTM@P3   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@Q3
+         L     R0,DTM@M
+         SR    R0,R3
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0                      A(i,i)
+         LD    FPR6,0(,R11)
+         DDBR  FPR2,FPR6
+DTM@Q3   DS    0H
+         STD   FPR2,0(,R7)
+         LA    R7,8(,R7)
+         AR    R6,R8                       A col += LDA*8
+         BCT   R3,DTM@I3
+*
+         AR    R5,R9
+         BCT   R2,DTM@J3
+         B     DTM@RT
+*
+* ============================================================= *
+* LEFT / LOWER / TRANS                                             *
+* ============================================================= *
+*
+DTM@LLT  DS    0H
+         L     R5,DTM@BB
+         L     R2,DTM@N
+*
+DTM@J4   DS    0H
+* B(M-1,j) ptr
+         LR    R7,R5
+         L     R0,DTM@M
+         BCTR  R0,0
+         SLA   R0,3
+         AR    R7,R0
+* A col M-1
+         L     R6,DTM@AB
+         L     R0,DTM@M
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R6,R0
+         L     R3,DTM@M
+*
+DTM@I4   DS    0H                          ---- I loop (backward) ----
+         LD    FPR0,DTM@ALP
+         LD    FPR2,0(,R7)
+         MDBR  FPR2,FPR0                  alpha * B(i,j)
+* Inner: temp -= A(k,i)*B(k,j) for k=i+1..M-1
+         LR    R15,R3
+         BCTR  R15,0                       count = R3-1
+         LTR   R15,R15
+         BZ    DTM@P4
+         ST    R3,DTM@SL
+* A(i+1,i): i=M-R3, (i+1)*8
+         L     R0,DTM@M
+         SR    R0,R3
+         LA    R0,1(,R0)
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0                      A(i+1,i)
+* B(i+1,j)
+         LR    R3,R7
+         LA    R3,8(,R3)
+DTM@L4   DS    0H
+         LD    FPR6,0(,R11)
+         MDB   FPR6,0(,R3)
+         SDBR  FPR2,FPR6
+         LA    R11,8(,R11)
+         LA    R3,8(,R3)
+         BCT   R15,DTM@L4
+         L     R3,DTM@SL
+DTM@P4   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@Q4
+         L     R0,DTM@M
+         SR    R0,R3
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    FPR6,0(,R11)
+         DDBR  FPR2,FPR6
+DTM@Q4   DS    0H
+         STD   FPR2,0(,R7)
+         L     R0,=F'8'
+         SR    R7,R0                       B ptr -= 8
+         SR    R6,R8
+         BCT   R3,DTM@I4
+*
+         AR    R5,R9
+         BCT   R2,DTM@J4
+         B     DTM@RT
+*
+* ============================================================= *
+* RIGHT / UPPER / NO-TRANS                                         *
+* ============================================================= *
+*
+DTM@RU   DS    0H
+         L     R5,DTM@BB                  B col 0
+         L     R2,DTM@N
+*
+DTM@J5   DS    0H
+* Scale B(:,j) by alpha
+         LD    FPR0,DTM@ALP
+         LD    FPR6,DTM@1
+         CDBR  FPR0,FPR6
+         BE    DTM@S5
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@C5   LD    FPR2,0(,R6)
+         MDBR  FPR2,FPR0
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@C5
+DTM@S5   DS    0H
+* for k=0..j-1: if A(k,j)!=0: B(:,j)-=A(k,j)*B(:,k)
+* j=N-R2, count=j
+         L     R15,DTM@N
+         SR    R15,R2                      j = count
+         LTR   R15,R15
+         BZ    DTM@F5
+* A(0,j): A col j. j*LDA*8
+         L     R6,DTM@AB
+         L     R0,DTM@N
+         SR    R0,R2
+         MSR   R0,R8
+         AR    R6,R0                       A col j base
+         L     R1,DTM@BB                  B col 0
+         LR    R11,R6                      A(0,j)
+DTM@H5   DS    0H
+         LD    FPR2,0(,R11)               A(k,j)
+         LTDBR FPR2,FPR2
+         BZ    DTM@G5
+         ST    R15,DTM@SL
+         LR    R7,R5                       B(0,j)
+         LR    R3,R1                       B(0,k)
+         L     R4,DTM@M
+DTM@E5   LD    FPR6,0(,R3)                B(i,k)
+         MDBR  FPR6,FPR2
+         LD    FPR4,0(,R7)
+         SDBR  FPR4,FPR6
+         STD   FPR4,0(,R7)
+         LA    R7,8(,R7)
+         LA    R3,8(,R3)
+         BCT   R4,DTM@E5
+         L     R15,DTM@SL
+DTM@G5   DS    0H
+         LA    R11,8(,R11)                 next A row
+         AR    R1,R9                       B col += LDB*8
+         BCT   R15,DTM@H5
+DTM@F5   DS    0H
+* Divide column by A(j,j)
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@W5
+         L     R0,DTM@N
+         SR    R0,R2
+         SLA   R0,3
+         L     R6,DTM@AB
+         L     R1,DTM@N
+         SR    R1,R2
+         MSR   R1,R8
+         AR    R6,R1
+         AR    R6,R0                       A(j,j)
+         LD    FPR6,0(,R6)
+         LD    FPR2,DTM@1
+         DDBR  FPR2,FPR6                  1/A(j,j)
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@X5   LD    FPR4,0(,R7)
+         MDBR  FPR4,FPR2
+         STD   FPR4,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@X5
+DTM@W5   DS    0H
+         AR    R5,R9
+         BCT   R2,DTM@J5
+         B     DTM@RT
+*
+* ============================================================= *
+* RIGHT / LOWER / NO-TRANS                                         *
+* ============================================================= *
+*
+DTM@RL   DS    0H
+* B col for j=N-1
+         L     R5,DTM@BB
+         L     R0,DTM@N
+         BCTR  R0,0
+         MSR   R0,R9
+         AR    R5,R0
+         L     R2,DTM@N
+*
+DTM@J6   DS    0H
+         LD    FPR0,DTM@ALP
+         LD    FPR6,DTM@1
+         CDBR  FPR0,FPR6
+         BE    DTM@S6
+         LR    R6,R5
+         L     R4,DTM@M
+DTM@C6   LD    FPR2,0(,R6)
+         MDBR  FPR2,FPR0
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DTM@C6
+DTM@S6   DS    0H
+* for k=j+1..N-1: B(:,j) -= A(k,j)*B(:,k)
+         LR    R15,R2
+         BCTR  R15,0
+         LTR   R15,R15
+         BZ    DTM@F6
+* j=N-R2. A(j+1,j)=A_col_j + (j+1)*8
+         L     R6,DTM@AB
+         L     R0,DTM@N
+         SR    R0,R2
+         MSR   R0,R8
+         AR    R6,R0                       A col j
+         L     R0,DTM@N
+         SR    R0,R2
+         LA    R0,1(,R0)
+         SLA   R0,3
+         AR    R6,R0                       (dead, recomputed below)
+         L     R6,DTM@AB
+         L     R0,DTM@N
+         SR    R0,R2
+         MSR   R0,R8
+         AR    R6,R0                       A col j base
+         L     R0,DTM@N
+         SR    R0,R2
+         LA    R0,1(,R0)
+         SLA   R0,3
+         AR    R6,R0                       A(j+1,j)
+* B col j+1
+         LR    R1,R5
+         AR    R1,R9                       B col after j
+DTM@H6   DS    0H
+         LD    FPR2,0(,R6)
+         LTDBR FPR2,FPR2
+         BZ    DTM@G6
+         ST    R15,DTM@SL
+         LR    R7,R5
+         LR    R3,R1
+         L     R4,DTM@M
+DTM@E6   LD    FPR6,0(,R3)
+         MDBR  FPR6,FPR2
+         LD    FPR4,0(,R7)
+         SDBR  FPR4,FPR6
+         STD   FPR4,0(,R7)
+         LA    R7,8(,R7)
+         LA    R3,8(,R3)
+         BCT   R4,DTM@E6
+         L     R15,DTM@SL
+DTM@G6   DS    0H
+         LA    R6,8(,R6)
+         AR    R1,R9
+         BCT   R15,DTM@H6
+DTM@F6   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@W6
+         L     R6,DTM@AB
+         L     R0,DTM@N
+         SR    R0,R2
+         MSR   R0,R8
+         LR    R11,R6
+         AR    R11,R0
+         L     R0,DTM@N
+         SR    R0,R2
+         SLA   R0,3
+         AR    R11,R0                      A(j,j)
+         LD    FPR6,0(,R11)
+         LD    FPR2,DTM@1
+         DDBR  FPR2,FPR6
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@X6   LD    FPR4,0(,R7)
+         MDBR  FPR4,FPR2
+         STD   FPR4,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@X6
+DTM@W6   DS    0H
+         SR    R5,R9
+         BCT   R2,DTM@J6
+         B     DTM@RT
+*
+* ============================================================= *
+* RIGHT / UPPER / TRANS                                            *
+* ============================================================= *
+*
+DTM@RUT  DS    0H
+* k=N-1 downto 0
+         L     R2,DTM@N
+* B col k=N-1
+         L     R5,DTM@BB
+         L     R0,DTM@N
+         BCTR  R0,0
+         MSR   R0,R9
+         AR    R5,R0
+* A col k=N-1
+         L     R6,DTM@AB
+         L     R0,DTM@N
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R6,R0
+*
+DTM@J7   DS    0H
+* Divide B(:,k) by A(k,k)
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@D7
+         L     R0,DTM@N
+         SR    R0,R2
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    FPR6,0(,R11)
+         LD    FPR2,DTM@1
+         DDBR  FPR2,FPR6                  1/A(k,k)
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@Y7   LD    FPR4,0(,R7)
+         MDBR  FPR4,FPR2
+         STD   FPR4,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@Y7
+DTM@D7   DS    0H
+* for j=0..k-1: B(:,j) -= A(j,k)*B(:,k)
+         L     R15,DTM@N
+         SR    R15,R2                      k = count
+         LTR   R15,R15
+         BZ    DTM@F7
+         L     R1,DTM@BB                  B col 0
+         LR    R11,R6                      A(0,k)
+DTM@H7   DS    0H
+         LD    FPR2,0(,R11)               A(j,k)
+         LTDBR FPR2,FPR2
+         BZ    DTM@G7
+         ST    R15,DTM@SL
+         LR    R7,R1                       B(0,j)
+         LR    R3,R5                       B(0,k)
+         L     R4,DTM@M
+DTM@E7   LD    FPR6,0(,R3)
+         MDBR  FPR6,FPR2
+         LD    FPR4,0(,R7)
+         SDBR  FPR4,FPR6
+         STD   FPR4,0(,R7)
+         LA    R7,8(,R7)
+         LA    R3,8(,R3)
+         BCT   R4,DTM@E7
+         L     R15,DTM@SL
+DTM@G7   DS    0H
+         LA    R11,8(,R11)
+         AR    R1,R9
+         BCT   R15,DTM@H7
+DTM@F7   DS    0H
+* Scale B(:,k) by alpha
+         LD    FPR0,DTM@ALP
+         LD    FPR6,DTM@1
+         CDBR  FPR0,FPR6
+         BE    DTM@W7
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@Z7   LD    FPR2,0(,R7)
+         MDBR  FPR2,FPR0
+         STD   FPR2,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@Z7
+DTM@W7   DS    0H
+         SR    R5,R9
+         SR    R6,R8
+         BCT   R2,DTM@J7
+         B     DTM@RT
+*
+* ============================================================= *
+* RIGHT / LOWER / TRANS                                            *
+* ============================================================= *
+*
+DTM@RLT  DS    0H
+         L     R5,DTM@BB                  B col 0
+         L     R6,DTM@AB                  A col 0
+         L     R2,DTM@N
+*
+DTM@J8   DS    0H
+         CLI   DTM@DG,X'D5'
+         BNE   DTM@D8
+         L     R0,DTM@N
+         SR    R0,R2
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0
+         LD    FPR6,0(,R11)
+         LD    FPR2,DTM@1
+         DDBR  FPR2,FPR6
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@Y8   LD    FPR4,0(,R7)
+         MDBR  FPR4,FPR2
+         STD   FPR4,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@Y8
+DTM@D8   DS    0H
+* for j=k+1..N-1: B(:,j) -= A(j,k)*B(:,k)
+         LR    R15,R2
+         BCTR  R15,0
+         LTR   R15,R15
+         BZ    DTM@F8
+         L     R0,DTM@N
+         SR    R0,R2
+         LA    R0,1(,R0)
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0                      A(k+1,k)
+         LR    R1,R5
+         AR    R1,R9                       B col k+1
+DTM@H8   DS    0H
+         LD    FPR2,0(,R11)
+         LTDBR FPR2,FPR2
+         BZ    DTM@G8
+         ST    R15,DTM@SL
+         LR    R7,R1
+         LR    R3,R5
+         L     R4,DTM@M
+DTM@E8   LD    FPR6,0(,R3)
+         MDBR  FPR6,FPR2
+         LD    FPR4,0(,R7)
+         SDBR  FPR4,FPR6
+         STD   FPR4,0(,R7)
+         LA    R7,8(,R7)
+         LA    R3,8(,R3)
+         BCT   R4,DTM@E8
+         L     R15,DTM@SL
+DTM@G8   DS    0H
+         LA    R11,8(,R11)
+         AR    R1,R9
+         BCT   R15,DTM@H8
+DTM@F8   DS    0H
+         LD    FPR0,DTM@ALP
+         LD    FPR6,DTM@1
+         CDBR  FPR0,FPR6
+         BE    DTM@W8
+         LR    R7,R5
+         L     R4,DTM@M
+DTM@Z8   LD    FPR2,0(,R7)
+         MDBR  FPR2,FPR0
+         STD   FPR2,0(,R7)
+         LA    R7,8(,R7)
+         BCT   R4,DTM@Z8
+DTM@W8   DS    0H
+         AR    R5,R9
+         AR    R6,R8
+         BCT   R2,DTM@J8
+         B     DTM@RT
+*
+DTM@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+DTM@M    DS    F
+DTM@N    DS    F
+DTM@LDA  DS    F
+DTM@LDB  DS    F
+         DS    0C
+DTM@SD   DS    C
+DTM@UP   DS    C
+DTM@TR   DS    C
+DTM@DG   DS    C
+         DS    0D
+DTM@ALP  DS    D
+DTM@AB   DS    F
+DTM@BB   DS    F
+DTM@SL   DS    F
+         DS    0D
+DTM@1    DC    X'3FF0000000000000'        BFP 1.0
+*
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   DTRSM

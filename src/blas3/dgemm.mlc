@@ -1,0 +1,433 @@
+*---------------------------------------------------------------------*
+* DGEMM - Double-precision GEneral Matrix Multiply                    *
+*                                                                     *
+* C := alpha * op(A) * op(B) + beta * C                               *
+* op(X) = X or X'. 13 parms, TRANSA/TRANSB/M/N/K/ALPHA/A/LDA/       *
+* B/LDB/BETA/C/LDC(0x80). Column-major, scalar path.                 *
+*                                                                     *
+* Written with the quiet confidence of someone who has never          *
+* accidentally transposed a matrix and shipped it to production.      *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DGEMM
+*
+* Like unpacking a clown car, except the clowns are doubles.
+* R0 cannot be a base register. Use R1 for all dereferences.
+*
+         LR    R11,R1                      Parm list base
+*
+         L     R1,0(,R11)                  Addr of TRANSA
+         MVC   DGM@TA(1),0(R1)            Store TRANSA
+         L     R1,4(,R11)                  Addr of TRANSB
+         MVC   DGM@TB(1),0(R1)            Store TRANSB
+*
+         L     R1,8(,R11)                  Addr of M
+         L     R1,0(,R1)
+         ST    R1,DGM@M                   M
+         L     R1,12(,R11)                 Addr of N
+         L     R1,0(,R1)
+         ST    R1,DGM@N                   N
+         L     R1,16(,R11)                 Addr of K
+         L     R1,0(,R1)
+         ST    R1,DGM@K                   K
+*
+         L     R1,20(,R11)                 Addr of ALPHA
+         LD    FPR0,0(,R1)                 alpha -> FPR0
+         STD   FPR0,DGM@ALP               Save alpha
+*
+         L     R1,24(,R11)                 A base address
+         ST    R1,DGM@AB
+         L     R1,28(,R11)                 Addr of LDA
+         L     R1,0(,R1)
+         ST    R1,DGM@LDA
+*
+         L     R1,32(,R11)                 B base address
+         ST    R1,DGM@BB
+         L     R1,36(,R11)                 Addr of LDB
+         L     R1,0(,R1)
+         ST    R1,DGM@LDB
+*
+         L     R1,40(,R11)                 Addr of BETA
+         LD    FPR4,0(,R1)                 beta -> FPR4
+         STD   FPR4,DGM@BET               Save beta
+*
+         L     R1,44(,R11)                 C base address
+         ST    R1,DGM@CB
+         L     R1,48(,R11)                 Addr of LDC (high bit)
+         N     R1,=X'7FFFFFFF'             Mask off high bit
+         L     R1,0(,R1)
+         ST    R1,DGM@LDC
+*
+* Quick return: M <= 0 or N <= 0
+*
+         L     R0,DGM@M
+         LTR   R0,R0
+         BNP   DGM@RT
+         L     R0,DGM@N
+         LTR   R0,R0
+         BNP   DGM@RT
+*
+* Byte strides
+*
+         L     R8,DGM@LDA
+         SLA   R8,3                        LDA * 8
+         L     R9,DGM@LDB
+         SLA   R9,3                        LDB * 8
+         L     R10,DGM@LDC
+         SLA   R10,3                       LDC * 8
+*
+* Alpha == 0: scale C by beta and go home early
+*
+         LD    FPR0,DGM@ALP
+         LTDBR FPR0,FPR0                   alpha == 0?
+         BNZ   DGM@GO                      No -> real work
+*
+* Scale every element of C by beta (or zero it)
+*
+         L     R5,DGM@CB                   C base
+         L     R2,DGM@N                    j = N (outer)
+         LTDBR FPR4,FPR4                   beta == 0?
+         BZ    DGM@AZ                      Zero path
+*
+DGM@AS   DS    0H                          ---- alpha=0, beta!=0 ----
+         LR    R6,R5                       col ptr
+         L     R4,DGM@M                    i = M
+DGM@A1   DS    0H
+         LD    FPR2,0(,R6)                 C(i,j)
+         MDBR  FPR2,FPR4                   * beta
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)                   next row
+         BCT   R4,DGM@A1
+         AR    R5,R10                      next col
+         BCT   R2,DGM@AS
+         B     DGM@RT
+*
+DGM@AZ   DS    0H                          ---- alpha=0, beta=0 ----
+         LR    R6,R5
+         L     R4,DGM@M
+         SDBR  FPR2,FPR2                   0.0
+DGM@A2   DS    0H
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@A2
+         AR    R5,R10
+         BCT   R2,DGM@AZ
+         B     DGM@RT
+*
+* Dispatch on transpose (EBCDIC: N=X'D5', T=X'E3', C=X'C3')
+*
+DGM@GO   DS    0H
+         CLI   DGM@TA,X'D5'               TRANSA == 'N'?
+         BNE   DGM@TX                      A transposed
+         CLI   DGM@TB,X'D5'               TRANSB == 'N'?
+         BNE   DGM@NT                      N,T case
+         B     DGM@NN                      N,N case
+DGM@TX   DS    0H
+         CLI   DGM@TB,X'D5'               TRANSB == 'N'?
+         BNE   DGM@TT                      T,T case
+         B     DGM@TN                      T,N case
+*
+* ============================================================= *
+* NN CASE: DAXPY form, both not transposed                        *
+*                                                                 *
+* for j=0..N-1:                                                   *
+*   scale C(:,j) by beta                                          *
+*   for l=0..K-1:                                                 *
+*     temp = alpha * B(l,j)  [= B + j*LDB*8 + l*8]               *
+*     if temp != 0:                                                *
+*       for i=0..M-1:                                              *
+*         C(i,j) += temp * A(i,l)                                  *
+*                                                                 *
+* R2=j, R3=l, R4=i, R5=C-col, R6=A-col, R7=B-col, R11=C-row     *
+* FPR0=alpha, FPR4=beta, FPR2=temp, FPR6=scratch                 *
+* ============================================================= *
+*
+DGM@NN   DS    0H
+         L     R5,DGM@CB                   C col ptr
+         L     R7,DGM@BB                   B col ptr
+         L     R2,DGM@N                    j counter
+*
+DGM@NJL  DS    0H                          ---- J loop (NN) ----
+* Scale C(:,j) by beta
+         LTDBR FPR4,FPR4                   beta == 0?
+         BZ    DGM@NBZ
+         LD    FPR6,DGM@1                  load 1.0
+         CDBR  FPR4,FPR6                   beta == 1?
+         BE    DGM@NB1
+* beta != 0 and != 1: scale
+         LR    R6,R5
+         L     R4,DGM@M
+DGM@NBS  DS    0H
+         LD    FPR2,0(,R6)
+         MDBR  FPR2,FPR4
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@NBS
+         B     DGM@NB1
+* beta == 0: zero C(:,j)
+DGM@NBZ  DS    0H
+         LR    R6,R5
+         L     R4,DGM@M
+         SDBR  FPR2,FPR2
+DGM@NZ1  DS    0H
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@NZ1
+*
+DGM@NB1  DS    0H                          ---- L loop (NN) ----
+         L     R6,DGM@AB                   A col ptr (col 0)
+         LR    R1,R7                       B element ptr (B(0,j))
+         L     R3,DGM@K                    l counter
+         LTR   R3,R3
+         BNP   DGM@NJN                     K <= 0 -> next j
+*
+DGM@NLL  DS    0H
+         LD    FPR2,0(,R1)                 B(l,j)
+         MDBR  FPR2,FPR0                   temp = alpha * B(l,j)
+         LTDBR FPR2,FPR2                   temp == 0?
+         BZ    DGM@NLX                     Skip I-loop
+* I-loop: C(i,j) += temp * A(i,l)
+         ST    R3,DGM@SL                   Spill l-counter
+         LR    R11,R5                      R11 = C(0,j)
+         LR    R3,R6                       R3 = A(0,l) (reuse R3)
+         L     R4,DGM@M                    i counter
+DGM@NIL  DS    0H
+         LD    FPR6,0(,R3)                 A(i,l)
+         MDBR  FPR6,FPR2                   temp * A(i,l)
+         ADB   FPR6,0(,R11)                + C(i,j)
+         STD   FPR6,0(,R11)                store C(i,j)
+         LA    R3,8(,R3)                   next A row
+         LA    R11,8(,R11)                  next C row
+         BCT   R4,DGM@NIL
+         L     R3,DGM@SL                   Restore l-counter
+*
+DGM@NLX  DS    0H                          ---- advance L ----
+         AR    R6,R8                       A col += LDA*8
+         LA    R1,8(,R1)                   B element += 8
+         BCT   R3,DGM@NLL
+*
+DGM@NJN  DS    0H                          ---- advance J (NN) ----
+         AR    R5,R10                      C col += LDC*8
+         AR    R7,R9                       B col += LDB*8
+         BCT   R2,DGM@NJL
+         B     DGM@RT
+*
+* ============================================================= *
+* NT CASE: DAXPY form, A not transposed, B transposed             *
+*                                                                 *
+* Same as NN but B(l,j) becomes B(j,l): B + l*LDB*8 + j*8       *
+* ============================================================= *
+*
+DGM@NT   DS    0H
+         L     R5,DGM@CB
+         L     R2,DGM@N
+         SR    R7,R7                       j*8 offset for B
+*
+DGM@TJL  DS    0H                          ---- J loop (NT) ----
+* Scale C(:,j) by beta (same as NN)
+         LTDBR FPR4,FPR4
+         BZ    DGM@TBZ
+         LD    FPR6,DGM@1
+         CDBR  FPR4,FPR6
+         BE    DGM@TB1
+         LR    R6,R5
+         L     R4,DGM@M
+DGM@TBS  DS    0H
+         LD    FPR2,0(,R6)
+         MDBR  FPR2,FPR4
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@TBS
+         B     DGM@TB1
+DGM@TBZ  DS    0H
+         LR    R6,R5
+         L     R4,DGM@M
+         SDBR  FPR2,FPR2
+DGM@TZ1  DS    0H
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R4,DGM@TZ1
+*
+DGM@TB1  DS    0H                          ---- L loop (NT) ----
+         L     R6,DGM@AB                   A col ptr (col 0)
+         L     R1,DGM@BB                   B base
+*        B(j,l) = BB + l*LDB*8 + j*8. R1 walks l, R7 holds j*8
+         L     R3,DGM@K
+         LTR   R3,R3
+         BNP   DGM@TJN
+*
+DGM@TLL  DS    0H
+         LR    R11,R1                      B col l base
+         AR    R11,R7                      + j*8 -> &B(j,l)
+         LD    FPR2,0(,R11)                B(j,l)
+         MDBR  FPR2,FPR0                   temp = alpha * B(j,l)
+         LTDBR FPR2,FPR2
+         BZ    DGM@TLX
+         ST    R3,DGM@SL
+         LR    R11,R5
+         LR    R3,R6
+         L     R4,DGM@M
+DGM@TIL  DS    0H
+         LD    FPR6,0(,R3)                 A(i,l)
+         MDBR  FPR6,FPR2
+         ADB   FPR6,0(,R11)
+         STD   FPR6,0(,R11)
+         LA    R3,8(,R3)
+         LA    R11,8(,R11)
+         BCT   R4,DGM@TIL
+         L     R3,DGM@SL
+*
+DGM@TLX  DS    0H
+         AR    R6,R8                       A col += LDA*8
+         AR    R1,R9                       B col += LDB*8
+         BCT   R3,DGM@TLL
+*
+DGM@TJN  DS    0H
+         AR    R5,R10
+         LA    R7,8(,R7)                   j*8 += 8
+         BCT   R2,DGM@TJL
+         B     DGM@RT
+*
+* ============================================================= *
+* TN CASE: Dot product form, A transposed, B not                  *
+*                                                                 *
+* for j=0..N-1:                                                   *
+*   for i=0..M-1:                                                 *
+*     temp = sum_l A(l,i)*B(l,j)                                  *
+*     C(i,j) = alpha*temp + beta*C(i,j)                           *
+*                                                                 *
+* A(l,i) = A + i*LDA*8 + l*8  (A transposed: op(A)(i,l)=A(l,i)) *
+* B(l,j) = B + j*LDB*8 + l*8                                     *
+* ============================================================= *
+*
+DGM@TN   DS    0H
+         L     R5,DGM@CB                   C col ptr
+         L     R7,DGM@BB                   B col ptr
+         L     R2,DGM@N                    j counter
+*
+DGM@XJL  DS    0H                          ---- J loop (TN) ----
+         L     R6,DGM@AB                   A col ptr (col 0)
+         LR    R11,R5                      C(0,j)
+         L     R4,DGM@M                    i counter
+*
+DGM@XIL  DS    0H                          ---- I loop (TN) ----
+         SDBR  FPR2,FPR2                   temp = 0
+         ST    R4,DGM@SL                   Spill i-counter
+         LR    R3,R6                       A(0,i) ptr
+         LR    R1,R7                       B(0,j) ptr
+         L     R4,DGM@K                    l counter
+         LTR   R4,R4
+         BNP   DGM@XLS                     K<=0 skip
+*
+DGM@XLL  DS    0H                          ---- L loop (TN) ----
+         LD    FPR6,0(,R3)                 A(l,i)
+         MDB   FPR6,0(,R1)                 * B(l,j)
+         ADBR  FPR2,FPR6                   temp += A(l,i)*B(l,j)
+         LA    R3,8(,R3)                   next A row
+         LA    R1,8(,R1)                   next B row
+         BCT   R4,DGM@XLL
+*
+DGM@XLS  DS    0H                          ---- Store C(i,j) ----
+         MDBR  FPR2,FPR0                   alpha * temp
+         LTDBR FPR4,FPR4                   beta == 0?
+         BZ    DGM@XST
+         LD    FPR6,0(,R11)                C(i,j)
+         MDBR  FPR6,FPR4                   beta * C(i,j)
+         ADBR  FPR2,FPR6                   + alpha*temp
+DGM@XST  DS    0H
+         STD   FPR2,0(,R11)                store C(i,j)
+         L     R4,DGM@SL                   Restore i-counter
+         LA    R11,8(,R11)                  next C row
+         AR    R6,R8                       A col += LDA*8 (next i)
+         BCT   R4,DGM@XIL
+*
+         AR    R5,R10                      C col += LDC*8
+         AR    R7,R9                       B col += LDB*8
+         BCT   R2,DGM@XJL
+         B     DGM@RT
+*
+* ============================================================= *
+* TT CASE: Dot product form, both transposed                      *
+*                                                                 *
+* Same as TN but B(l,j) becomes B(j,l): B + l*LDB*8 + j*8       *
+* ============================================================= *
+*
+DGM@TT   DS    0H
+         L     R5,DGM@CB
+         L     R2,DGM@N
+         SR    R7,R7                       j*8 offset for B
+*
+DGM@YJL  DS    0H                          ---- J loop (TT) ----
+         L     R6,DGM@AB                   A col 0
+         LR    R11,R5                      C(0,j)
+         L     R4,DGM@M
+*
+DGM@YIL  DS    0H                          ---- I loop (TT) ----
+         SDBR  FPR2,FPR2                   temp = 0
+         ST    R4,DGM@SL
+         LR    R3,R6                       A(0,i) ptr
+         L     R1,DGM@BB                   B base
+         L     R4,DGM@K
+         LTR   R4,R4
+         BNP   DGM@YLS
+*
+DGM@YLL  DS    0H                          ---- L loop (TT) ----
+         LD    FPR6,0(,R3)                 A(l,i)
+*        B(j,l) = BB + l*LDB*8 + j*8
+         LR    R15,R1                      B col l base
+         AR    R15,R7                      + j*8
+         MDB   FPR6,0(,R15)               * B(j,l)
+         ADBR  FPR2,FPR6
+         LA    R3,8(,R3)
+         AR    R1,R9                       B += LDB*8 (next l col)
+         BCT   R4,DGM@YLL
+*
+DGM@YLS  DS    0H
+         MDBR  FPR2,FPR0
+         LTDBR FPR4,FPR4
+         BZ    DGM@YST
+         LD    FPR6,0(,R11)
+         MDBR  FPR6,FPR4
+         ADBR  FPR2,FPR6
+DGM@YST  DS    0H
+         STD   FPR2,0(,R11)
+         L     R4,DGM@SL
+         LA    R11,8(,R11)
+         AR    R6,R8                       A col += LDA*8
+         BCT   R4,DGM@YIL
+*
+         AR    R5,R10
+         LA    R7,8(,R7)                   j*8 += 8
+         BCT   R2,DGM@YJL
+         B     DGM@RT
+*
+DGM@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+DGM@M    DS    F                          M
+DGM@N    DS    F                          N
+DGM@K    DS    F                          K
+DGM@LDA  DS    F                          LDA
+DGM@LDB  DS    F                          LDB
+DGM@LDC  DS    F                          LDC
+         DS    0C
+DGM@TA   DS    C                          TRANSA
+DGM@TB   DS    C                          TRANSB
+         DS    0D
+DGM@ALP  DS    D                          alpha
+DGM@BET  DS    D                          beta
+DGM@AB   DS    F                          A base
+DGM@BB   DS    F                          B base
+DGM@CB   DS    F                          C base
+DGM@SL   DS    F                          spill slot
+         DS    0D
+DGM@1    DC    X'3FF0000000000000'        BFP 1.0
+         DS    0D
+ZB@STFL  DS    3D                         24 bytes for STFLE
+*
+         END   DGEMM

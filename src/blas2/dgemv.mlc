@@ -1,0 +1,271 @@
+*---------------------------------------------------------------------*
+* DGEMV - Double-precision GEneral Matrix-Vector multiply             *
+*                                                                     *
+* y := alpha * op(A) * x + beta * y                                   *
+*   op(A) = A if TRANS='N', A' if TRANS='T'/'C'                       *
+*   Column-major: A(i,j) at A + j*LDA*8 + i*8                        *
+*                                                                     *
+* OS linkage (R1 -> addr list, 11 parms):                             *
+*   +0  TRANS (char)  +4  M (F)     +8  N (F)    +12 ALPHA (D)       *
+*  +16  A (array)    +20  LDA (F)  +24  X (array) +28 INCX (F)       *
+*  +32  BETA (D)     +36  Y (array) +40 INCY (F, 0x80)               *
+*                                                                     *
+* Scalar only. Not reentrant.                                         *
+* Eleven parameters. The API designers were paid by the argument.     *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DGEMV
+*
+* ---- Extract parameters ----
+*
+         LR    R11,R1                      Parm list base
+*
+         L     R1,0(,R11)                  Addr of TRANS
+         MVC   DGV@TR(1),0(R1)            Store TRANS
+*
+         L     R1,4(,R11)                  Addr of M
+         L     R1,0(,R1)
+         ST    R1,DGV@M                   M
+         L     R1,8(,R11)                  Addr of N
+         L     R1,0(,R1)
+         ST    R1,DGV@N                   N
+*
+         L     R1,12(,R11)                 Addr of ALPHA
+         LD    FPR0,0(,R1)                alpha -> FPR0
+         STD   FPR0,DGV@ALP               Save alpha
+*
+         L     R1,16(,R11)                 A base address
+         ST    R1,DGV@AB
+         L     R1,20(,R11)                 Addr of LDA
+         L     R1,0(,R1)
+         ST    R1,DGV@LDA
+*
+         L     R1,24(,R11)                 X base address
+         ST    R1,DGV@XB
+         L     R1,28(,R11)                 Addr of INCX
+         L     R1,0(,R1)
+         ST    R1,DGV@IX
+*
+         L     R1,32(,R11)                 Addr of BETA
+         LD    FPR4,0(,R1)                beta -> FPR4
+         STD   FPR4,DGV@BET               Save beta
+*
+         L     R1,36(,R11)                 Y base address
+         ST    R1,DGV@YB
+         L     R1,40(,R11)                 Addr of INCY (high bit)
+         N     R1,=X'7FFFFFFF'             Mask off high bit
+         L     R1,0(,R1)
+         ST    R1,DGV@IY
+*
+* ---- Quick return: M <= 0 or N <= 0 ----
+*
+         L     R0,DGV@M
+         LTR   R0,R0
+         BNP   DGV@RT
+         L     R0,DGV@N
+         LTR   R0,R0
+         BNP   DGV@RT
+*
+* ---- Compute byte strides ----
+*
+         L     R8,DGV@LDA
+         SLA   R8,3                        LDA * 8
+         L     R9,DGV@IX
+         SLA   R9,3                        INCX * 8 (signed)
+         L     R10,DGV@IY
+         SLA   R10,3                       INCY * 8 (signed)
+*
+* ---- Adjust bases for negative strides ----
+*
+         CLI   DGV@TR,X'D5'
+         BE    DGV@AN
+         L     R0,DGV@M                   lenx (T)
+         L     R1,DGV@N                   leny (T)
+         B     DGV@AJ
+DGV@AN   DS    0H
+         L     R0,DGV@N                   lenx (N)
+         L     R1,DGV@M                   leny (N)
+DGV@AJ   DS    0H
+         LTR   R9,R9
+         BNM   DGV@AY
+         LR    R3,R0                       lenx
+         BCTR  R3,0                        lenx - 1
+         MSR   R3,R9                       (lenx-1)*INCX*8 (neg)
+         LCR   R3,R3                       positive offset
+         L     R7,DGV@XB
+         AR    R7,R3
+         ST    R7,DGV@XB
+DGV@AY   DS    0H
+         LTR   R10,R10
+         BNM   DGV@SC
+         LR    R3,R1                       leny
+         BCTR  R3,0
+         MSR   R3,R10
+         LCR   R3,R3
+         L     R7,DGV@YB
+         AR    R7,R3
+         ST    R7,DGV@YB
+*
+* ---- Scale y by beta ----
+* The bit where we pretend beta=0 means "clear" not "multiply".
+*
+DGV@SC   DS    0H
+         CLI   DGV@TR,X'D5'
+         BNE   DGV@S1
+         L     R4,DGV@M                   leny = M
+         B     DGV@S2
+DGV@S1   L     R4,DGV@N                   leny = N
+DGV@S2   DS    0H
+         L     R3,DGV@YB                  y base (adjusted)
+         LTDBR FPR4,FPR4                  beta == 0?
+         BZ    DGV@BZ
+         LD    FPR6,DGV@1                 load 1.0
+         CDBR  FPR4,FPR6                  beta == 1?
+         BE    DGV@B1
+         LR    R6,R3
+DGV@BS   DS    0H
+         LD    FPR2,0(,R6)
+         MDBR  FPR2,FPR4
+         STD   FPR2,0(,R6)
+         AR    R6,R10
+         BCT   R4,DGV@BS
+         B     DGV@B1
+DGV@BZ   DS    0H
+         LR    R6,R3
+         SDBR  FPR2,FPR2
+DGV@Z1   DS    0H
+         STD   FPR2,0(,R6)
+         AR    R6,R10
+         BCT   R4,DGV@Z1
+*
+DGV@B1   DS    0H
+*
+* ---- Alpha == 0? Return after beta scaling ----
+*
+         LD    FPR0,DGV@ALP
+         LTDBR FPR0,FPR0
+         BZ    DGV@RT
+*
+* ---- Dispatch on TRANS ----
+* EBCDIC: N=X'D5', T=X'E3', C=X'C3'
+*
+         CLI   DGV@TR,X'D5'               TRANS='N'?
+         BNE   DGV@TD                     Transposed path
+*
+* ============================================================= *
+* N CASE: DAXPY form                                               *
+*                                                                 *
+* for j=0..N-1:                                                   *
+*   temp = alpha * x(jx)                                          *
+*   if temp != 0:                                                  *
+*     for i=0..M-1:                                                *
+*       y(iy) += temp * A(i,j)                                     *
+*                                                                 *
+* R2=j, R3=y_base, R5=A col, R7=x ptr                             *
+* R4=i, R6=A row, R11=y inner                                     *
+* R8=LDA*8, R9=INCX*8, R10=INCY*8                                 *
+* FPR0=alpha, FPR2=temp, FPR6=scratch                              *
+* ============================================================= *
+*
+DGV@ND   DS    0H
+         L     R5,DGV@AB                  A col ptr
+         L     R7,DGV@XB                  x ptr
+         L     R3,DGV@YB                  y base (saved)
+         L     R2,DGV@N                   j counter
+*
+DGV@NJL  DS    0H                          ---- J loop (N) ----
+         LD    FPR2,0(,R7)                x(jx)
+         MDBR  FPR2,FPR0                  temp = alpha * x(jx)
+         LTDBR FPR2,FPR2                  temp == 0?
+         BZ    DGV@NJN
+         LR    R11,R3                     y ptr = y base
+         LR    R6,R5                      A ptr = A col start
+         L     R4,DGV@M                   i counter
+DGV@NIL  DS    0H
+         LD    FPR6,0(,R6)                A(i,j)
+         MDBR  FPR6,FPR2                  temp * A(i,j)
+         ADB   FPR6,0(,R11)               + y(iy)
+         STD   FPR6,0(,R11)               store y(iy)
+         LA    R6,8(,R6)                  next A row
+         AR    R11,R10                    next y
+         BCT   R4,DGV@NIL
+*
+DGV@NJN  DS    0H                          ---- advance J ----
+         AR    R5,R8                      A col += LDA*8
+         AR    R7,R9                      x += INCX*8
+         BCT   R2,DGV@NJL
+         B     DGV@RT
+*
+* ============================================================= *
+* T CASE: dot-product form                                         *
+*                                                                 *
+* for j=0..N-1:                                                   *
+*   temp = 0                                                      *
+*   for i=0..M-1:                                                 *
+*     temp += A(i,j) * x(ix)                                      *
+*   y(jy) += alpha * temp                                          *
+*                                                                 *
+* R2=j, R3=x_base, R5=A col, R11=y ptr                            *
+* R4=i, R6=A row, R7=x inner                                      *
+* FPR0=alpha, FPR2=temp, FPR6=scratch                              *
+* ============================================================= *
+*
+DGV@TD   DS    0H
+         L     R5,DGV@AB                  A col ptr
+         L     R3,DGV@XB                  x base (saved)
+         L     R11,DGV@YB                 y ptr
+         L     R2,DGV@N                   j counter
+*
+DGV@TJL  DS    0H                          ---- J loop (T) ----
+         SDBR  FPR2,FPR2                  temp = 0
+         LR    R7,R3                      x ptr = x base
+         LR    R6,R5                      A ptr = A col start
+         L     R4,DGV@M                   i counter
+*
+DGV@TIL  DS    0H                          ---- I loop (T) ----
+         LD    FPR6,0(,R6)                A(i,j)
+         MDB   FPR6,0(,R7)                * x(ix)
+         ADBR  FPR2,FPR6                  temp += ...
+         LA    R6,8(,R6)                  next A row
+         AR    R7,R9                      next x
+         BCT   R4,DGV@TIL
+*
+DGV@TLS  DS    0H                          ---- Store y(jy) ----
+         MDBR  FPR2,FPR0                  alpha * temp
+         ADB   FPR2,0(,R11)               + y(jy)
+         STD   FPR2,0(,R11)               store y(jy)
+*
+         AR    R5,R8                      A col += LDA*8
+         AR    R11,R10                    y += INCY*8
+         BCT   R2,DGV@TJL
+         B     DGV@RT
+*
+DGV@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+DGV@M    DS    F                          M
+DGV@N    DS    F                          N
+DGV@LDA  DS    F                          LDA
+DGV@IX   DS    F                          INCX
+DGV@IY   DS    F                          INCY
+         DS    0C
+DGV@TR   DS    C                          TRANS
+         DS    0D
+DGV@ALP  DS    D                          alpha
+DGV@BET  DS    D                          beta
+DGV@AB   DS    F                          A base
+DGV@XB   DS    F                          X base
+DGV@YB   DS    F                          Y base
+DGV@SL   DS    F                          spill slot
+         DS    0D
+DGV@1    DC    X'3FF0000000000000'        BFP 1.0
+*
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   DGEMV

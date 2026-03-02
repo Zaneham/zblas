@@ -1,0 +1,135 @@
+*---------------------------------------------------------------------*
+* DNRM2 -- Double-precision Euclidean NoRM                            *
+*                                                                     *
+* Computes: result = sqrt( sum( X(i)**2 ) )  for i = 1..N            *
+*                                                                     *
+* OS linkage parm list (R1 -> address list):                          *
+*   +0  addr of N      (fullword integer)                             *
+*   +4  addr of DX     (float64 array)                                *
+*   +8  addr of INCX   (fullword integer, high bit set -- last parm)  *
+*                                                                     *
+* Return: Euclidean norm in FPR0.                                     *
+*                                                                     *
+* Naive sum-of-squares then SQDBR. No Blue's scaling -- we'll add     *
+* that when a bank complains their 10^308 portfolio blew up.          *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DNRM2
+*
+* ---- Zero the accumulator ----
+*
+         SDBR  FPR0,FPR0                   FPR0 = 0.0
+*
+* ---- Load parameters ----
+*
+         LR    R11,R1
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   DNR@RT                      N <= 0 -> return 0
+*
+         L     R4,4(,R11)                  DX base
+         L     R5,8(,R11)                  Addr of INCX
+         L     R5,0(,R5)                   INCX
+*
+* ---- N=1 shortcut ----
+*
+         CHI   R2,1                        N == 1?
+         BNE   DNR@GO                      No -> continue
+         LD    FPR0,0(,R4)                 Just load the element
+         LPDBR FPR0,FPR0                   Return |X(1)|
+         B     DNR@RT
+*
+* ---- Unit stride check ----
+*
+DNR@GO   DS    0H
+         CHI   R5,1
+         BNE   DNR@SC
+*
+* ---- Probe for Vector Facility ----
+*
+         VFTEST R0
+         BZ    DNR@SU
+*
+* ============================================================= *
+* VECTOR PATH -- unit stride                                     *
+*                                                                *
+* VFM squares pairs, VFA accumulates. VHSUM + SQDBR at end.     *
+* ============================================================= *
+*
+         VGBM  V0,0                        V0 = 0 (accumulator)
+         LR    R8,R2
+         SRL   R8,1
+         LTR   R8,R8
+         BZ    DNR@VR
+*
+DNR@VL   DS    0H
+         VL    V1,0(,R4)
+         VFM   V2,V1,V1,3,0               V2 = X * X
+         VFA   V0,V0,V2,3,0               V0 += X*X
+         LA    R4,16(,R4)
+         BCT   R8,DNR@VL
+*
+         VHSUM V0                          Horizontal sum -> FPR0
+*
+DNR@VR   DS    0H
+         TML   R2,X'0001'
+         BZ    DNR@SQ
+         LD    FPR2,0(,R4)
+         MDBR  FPR2,FPR2                   X*X
+         ADBR  FPR0,FPR2
+*
+DNR@SQ   DS    0H
+         SQDBR FPR0,FPR0                   sqrt(sum)
+         B     DNR@RT
+*
+* ============================================================= *
+* SCALAR PATH (unit stride)                                      *
+* ============================================================= *
+*
+DNR@SU   DS    0H
+         LA    R5,8
+         B     DNR@SL
+*
+* ============================================================= *
+* SCALAR PATH (general)                                          *
+* ============================================================= *
+*
+DNR@SC   DS    0H
+         SLA   R5,3
+*
+         LTR   R5,R5
+         BNM   DNR@SL
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R5
+         LCR   R0,R0
+         AR    R4,R0
+*
+DNR@SL   DS    0H
+         LR    R8,R2
+*
+DNR@S1   DS    0H
+         LD    FPR2,0(,R4)
+         MDBR  FPR2,FPR2                   FPR2 = X(i)**2
+         ADBR  FPR0,FPR2                   FPR0 += X(i)**2
+         AR    R4,R5
+         BCT   R8,DNR@S1
+*
+         SQDBR FPR0,FPR0                   FPR0 = sqrt(sum)
+*
+* ============================================================= *
+* RETURN -- result in FPR0                                       *
+* ============================================================= *
+*
+DNR@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   DNRM2

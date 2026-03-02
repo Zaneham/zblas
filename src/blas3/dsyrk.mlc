@@ -1,0 +1,440 @@
+*---------------------------------------------------------------------*
+* DSYRK - Double-precision SYmmetric Rank-K update                    *
+*                                                                     *
+* C := alpha*A*A' + beta*C (N) or alpha*A'*A + beta*C (T)            *
+* Only the specified triangle of C is touched.                        *
+*                                                                     *
+* OS linkage (R1 -> addr list, 10 parms):                             *
+*   +0  UPLO (char) +4  TRANS (char) +8  N (F) +12 K (F)             *
+*  +16  ALPHA (D)  +20  A (array)   +24  LDA (F)                     *
+*  +28  BETA (D)   +32  C (array)   +36  LDC (F, 0x80)               *
+*                                                                     *
+* {U,L} x {N,T}. Scalar only. Not reentrant.                         *
+* The covariance matrix doesn't compute itself. Well, now it does.    *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DSYRK
+*
+* ---- Extract parameters ----
+*
+         LR    R11,R1
+*
+         L     R1,0(,R11)
+         MVC   DSK@UP(1),0(R1)
+         L     R1,4(,R11)
+         MVC   DSK@TR(1),0(R1)
+*
+         L     R1,8(,R11)
+         L     R1,0(,R1)
+         ST    R1,DSK@N
+         L     R1,12(,R11)
+         L     R1,0(,R1)
+         ST    R1,DSK@K
+*
+         L     R1,16(,R11)
+         LD    FPR0,0(,R1)
+         STD   FPR0,DSK@ALP
+*
+         L     R1,20(,R11)
+         ST    R1,DSK@AB
+         L     R1,24(,R11)
+         L     R1,0(,R1)
+         ST    R1,DSK@LDA
+*
+         L     R1,28(,R11)
+         LD    FPR4,0(,R1)
+         STD   FPR4,DSK@BET
+*
+         L     R1,32(,R11)
+         ST    R1,DSK@CB
+         L     R1,36(,R11)
+         N     R1,=X'7FFFFFFF'
+         L     R1,0(,R1)
+         ST    R1,DSK@LDC
+*
+* ---- Quick return: N <= 0 ----
+*
+         L     R0,DSK@N
+         LTR   R0,R0
+         BNP   DSK@RT
+*
+* ---- Quick return: alpha=0, beta=1 ----
+*
+         LD    FPR0,DSK@ALP
+         LTDBR FPR0,FPR0
+         BNZ   DSK@NZ
+         LD    FPR4,DSK@BET
+         LD    FPR6,DSK@1
+         CDBR  FPR4,FPR6
+         BE    DSK@RT                      alpha=0,beta=1 -> noop
+DSK@NZ   DS    0H
+*
+* ---- Byte strides ----
+*
+         L     R8,DSK@LDA
+         SLA   R8,3                        LDA*8
+         L     R10,DSK@LDC
+         SLA   R10,3                       LDC*8
+*
+* ---- Dispatch ----
+*
+         CLI   DSK@TR,X'D5'               TRANS='N'?
+         BNE   DSK@TX
+         CLI   DSK@UP,X'E4'               UPLO='U'?
+         BE    DSK@UN
+         B     DSK@LN
+DSK@TX   DS    0H
+         CLI   DSK@UP,X'E4'
+         BE    DSK@UT
+         B     DSK@LT
+*
+* ============================================================= *
+* UPPER / NO-TRANS: DAXPY form                                     *
+*                                                                 *
+* for j=0..N-1:                                                   *
+*   scale C(0..j,j) by beta                                       *
+*   for l=0..K-1:                                                  *
+*     temp = alpha * A(j,l)                                        *
+*     for i=0..j: C(i,j) += temp * A(i,l)                          *
+*                                                                 *
+* R2=j (forward), R5=C col, R3=l/inner, R4=i counter               *
+* R6=A col l, R7=A col l walk, R11=C walk                          *
+* R8=LDA*8, R10=LDC*8                                              *
+* FPR0=alpha, FPR2=temp, FPR4=beta, FPR6=scratch                   *
+* ============================================================= *
+*
+DSK@UN   DS    0H
+         LD    FPR0,DSK@ALP
+         LD    FPR4,DSK@BET
+         L     R5,DSK@CB                  C col 0
+         SR    R2,R2                       j = 0
+*
+DSK@UJL  DS    0H                          ---- J loop (U/N) ----
+* Scale C(0..j, j) by beta. Count = j+1.
+         LR    R4,R2
+         LA    R4,1(,R4)                   j+1
+         LTDBR FPR4,FPR4
+         BZ    DSK@UBZ
+         LD    FPR6,DSK@1
+         CDBR  FPR4,FPR6
+         BE    DSK@UB1
+         LR    R6,R5
+         LR    R3,R4                       save count
+DSK@UBS  DS    0H
+         LD    FPR2,0(,R6)
+         MDBR  FPR2,FPR4
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R3,DSK@UBS
+         B     DSK@UB1
+DSK@UBZ  DS    0H
+         LR    R6,R5
+         SDBR  FPR2,FPR2
+         LR    R3,R4
+DSK@UZ1  DS    0H
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R3,DSK@UZ1
+*
+DSK@UB1  DS    0H                          ---- L loop ----
+         LD    FPR0,DSK@ALP
+         LTDBR FPR0,FPR0
+         BZ    DSK@UJN                    alpha=0 -> skip
+         L     R6,DSK@AB                  A col 0
+         L     R3,DSK@K
+         LTR   R3,R3
+         BNP   DSK@UJN
+*
+DSK@ULL  DS    0H
+* temp = alpha * A(j,l)
+* A(j,l) = A_col_l + j*8
+         LR    R0,R2                       j
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0                      A(j,l)
+         LD    FPR2,0(,R11)
+         MDBR  FPR2,FPR0                  temp = alpha * A(j,l)
+         LTDBR FPR2,FPR2
+         BZ    DSK@ULX
+* Inner: C(i,j) += temp * A(i,l) for i=0..j
+         ST    R3,DSK@SL
+         LR    R11,R5                      C(0,j)
+         LR    R3,R6                       A(0,l)
+         LR    R4,R2
+         LA    R4,1(,R4)                   count = j+1
+DSK@UIL  DS    0H
+         LD    FPR6,0(,R3)                A(i,l)
+         MDBR  FPR6,FPR2                  temp * A(i,l)
+         ADB   FPR6,0(,R11)               + C(i,j)
+         STD   FPR6,0(,R11)
+         LA    R3,8(,R3)
+         LA    R11,8(,R11)
+         BCT   R4,DSK@UIL
+         L     R3,DSK@SL
+*
+DSK@ULX  DS    0H
+         AR    R6,R8                       A col += LDA*8
+         BCT   R3,DSK@ULL
+*
+DSK@UJN  DS    0H                          ---- advance J ----
+         AR    R5,R10                      C col += LDC*8
+         LA    R2,1(,R2)                   j++
+         C     R2,DSK@N
+         BL    DSK@UJL
+         B     DSK@RT
+*
+* ============================================================= *
+* LOWER / NO-TRANS: DAXPY form                                     *
+*                                                                 *
+* for j=0..N-1:                                                   *
+*   scale C(j..N-1,j) by beta                                     *
+*   for l=0..K-1:                                                  *
+*     temp = alpha * A(j,l)                                        *
+*     for i=j..N-1: C(i,j) += temp * A(i,l)                        *
+* ============================================================= *
+*
+DSK@LN   DS    0H
+         LD    FPR0,DSK@ALP
+         LD    FPR4,DSK@BET
+         L     R5,DSK@CB
+         SR    R2,R2                       j = 0
+*
+DSK@LJL  DS    0H                          ---- J loop (L/N) ----
+* Scale C(j..N-1, j) by beta. Count = N-j.
+         L     R4,DSK@N
+         SR    R4,R2                       N-j
+         LR    R0,R2
+         SLA   R0,3                        j*8
+         LTDBR FPR4,FPR4
+         BZ    DSK@LBZ
+         LD    FPR6,DSK@1
+         CDBR  FPR4,FPR6
+         BE    DSK@LB1
+         LR    R6,R5
+         AR    R6,R0                       C(j,j)
+         LR    R3,R4
+DSK@LBS  DS    0H
+         LD    FPR2,0(,R6)
+         MDBR  FPR2,FPR4
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R3,DSK@LBS
+         B     DSK@LB1
+DSK@LBZ  DS    0H
+         LR    R6,R5
+         AR    R6,R0
+         SDBR  FPR2,FPR2
+         LR    R3,R4
+DSK@LZ1  DS    0H
+         STD   FPR2,0(,R6)
+         LA    R6,8(,R6)
+         BCT   R3,DSK@LZ1
+*
+DSK@LB1  DS    0H                          ---- L loop ----
+         LD    FPR0,DSK@ALP
+         LTDBR FPR0,FPR0
+         BZ    DSK@LJN
+         L     R6,DSK@AB
+         L     R3,DSK@K
+         LTR   R3,R3
+         BNP   DSK@LJN
+*
+DSK@LLL  DS    0H
+         LR    R0,R2
+         SLA   R0,3
+         LR    R11,R6
+         AR    R11,R0                      A(j,l)
+         LD    FPR2,0(,R11)
+         MDBR  FPR2,FPR0
+         LTDBR FPR2,FPR2
+         BZ    DSK@LLX
+         ST    R3,DSK@SL
+         LR    R11,R5
+         LR    R0,R2
+         SLA   R0,3
+         AR    R11,R0                      C(j,j)
+         LR    R3,R6
+         LR    R0,R2
+         SLA   R0,3
+         AR    R3,R0                       A(j,l)
+         L     R4,DSK@N
+         SR    R4,R2                       count = N-j
+DSK@LIL  DS    0H
+         LD    FPR6,0(,R3)
+         MDBR  FPR6,FPR2
+         ADB   FPR6,0(,R11)
+         STD   FPR6,0(,R11)
+         LA    R3,8(,R3)
+         LA    R11,8(,R11)
+         BCT   R4,DSK@LIL
+         L     R3,DSK@SL
+*
+DSK@LLX  DS    0H
+         AR    R6,R8
+         BCT   R3,DSK@LLL
+*
+DSK@LJN  DS    0H
+         AR    R5,R10
+         LA    R2,1(,R2)
+         C     R2,DSK@N
+         BL    DSK@LJL
+         B     DSK@RT
+*
+* ============================================================= *
+* UPPER / TRANS: dot-product form                                  *
+*                                                                 *
+* for j=0..N-1:                                                   *
+*   for i=0..j:                                                    *
+*     temp = sum_l A(l,i)*A(l,j)                                   *
+*     C(i,j) = alpha*temp + beta*C(i,j)                            *
+*                                                                 *
+* R2=j, R5=C col, R7=A col j                                       *
+* R4=i counter, R6=A col i, R11=C inner                             *
+* FPR0=alpha, FPR2=temp, FPR4=beta, FPR6=scratch                   *
+* ============================================================= *
+*
+DSK@UT   DS    0H
+         LD    FPR0,DSK@ALP
+         LD    FPR4,DSK@BET
+         L     R5,DSK@CB
+         L     R7,DSK@AB                  A col 0 (= col j initially)
+         SR    R2,R2                       j = 0
+*
+DSK@TJL  DS    0H                          ---- J loop (U/T) ----
+         L     R6,DSK@AB                  A col i (starts at col 0)
+         LR    R11,R5                      C(0,j)
+         LR    R4,R2
+         LA    R4,1(,R4)                   i count = j+1
+*
+DSK@TIL  DS    0H                          ---- I loop ----
+         SDBR  FPR2,FPR2                  temp = 0
+         ST    R4,DSK@SL
+         LR    R3,R6                       A(0,i) ptr
+         LR    R1,R7                       A(0,j) ptr
+         L     R4,DSK@K
+         LTR   R4,R4
+         BNP   DSK@TLS
+*
+DSK@TLL  DS    0H                          ---- L loop ----
+         LD    FPR6,0(,R3)                A(l,i)
+         MDB   FPR6,0(,R1)                * A(l,j)
+         ADBR  FPR2,FPR6
+         LA    R3,8(,R3)
+         LA    R1,8(,R1)
+         BCT   R4,DSK@TLL
+*
+DSK@TLS  DS    0H                          ---- Store C(i,j) ----
+         MDBR  FPR2,FPR0                  alpha * temp
+         LTDBR FPR4,FPR4
+         BZ    DSK@TST
+         LD    FPR6,0(,R11)               C(i,j)
+         MDBR  FPR6,FPR4
+         ADBR  FPR2,FPR6
+DSK@TST  DS    0H
+         STD   FPR2,0(,R11)
+         L     R4,DSK@SL
+         LA    R11,8(,R11)                 next C row
+         AR    R6,R8                       A col i += LDA*8
+         BCT   R4,DSK@TIL
+*
+         AR    R5,R10                      C col += LDC*8
+         AR    R7,R8                       A col j += LDA*8
+         LA    R2,1(,R2)
+         C     R2,DSK@N
+         BL    DSK@TJL
+         B     DSK@RT
+*
+* ============================================================= *
+* LOWER / TRANS: dot-product form                                  *
+*                                                                 *
+* for j=0..N-1:                                                   *
+*   for i=j..N-1:                                                  *
+*     temp = sum_l A(l,i)*A(l,j)                                   *
+*     C(i,j) = alpha*temp + beta*C(i,j)                            *
+* ============================================================= *
+*
+DSK@LT   DS    0H
+         LD    FPR0,DSK@ALP
+         LD    FPR4,DSK@BET
+         L     R5,DSK@CB
+         L     R7,DSK@AB
+         SR    R2,R2                       j = 0
+*
+DSK@BJL  DS    0H                          ---- J loop (L/T) ----
+* A col i starts at col j
+         LR    R6,R7                       A col j (= col i initially)
+* C(j,j) ptr
+         LR    R11,R5
+         LR    R0,R2
+         SLA   R0,3
+         AR    R11,R0                      C(j,j)
+* Count = N-j
+         L     R4,DSK@N
+         SR    R4,R2
+*
+DSK@BIL  DS    0H                          ---- I loop ----
+         SDBR  FPR2,FPR2
+         ST    R4,DSK@SL
+         LR    R3,R6
+         LR    R1,R7
+         L     R4,DSK@K
+         LTR   R4,R4
+         BNP   DSK@BLS
+*
+DSK@BLL  DS    0H
+         LD    FPR6,0(,R3)
+         MDB   FPR6,0(,R1)
+         ADBR  FPR2,FPR6
+         LA    R3,8(,R3)
+         LA    R1,8(,R1)
+         BCT   R4,DSK@BLL
+*
+DSK@BLS  DS    0H
+         MDBR  FPR2,FPR0
+         LTDBR FPR4,FPR4
+         BZ    DSK@BST
+         LD    FPR6,0(,R11)
+         MDBR  FPR6,FPR4
+         ADBR  FPR2,FPR6
+DSK@BST  DS    0H
+         STD   FPR2,0(,R11)
+         L     R4,DSK@SL
+         LA    R11,8(,R11)
+         AR    R6,R8
+         BCT   R4,DSK@BIL
+*
+         AR    R5,R10
+         AR    R7,R8
+         LA    R2,1(,R2)
+         C     R2,DSK@N
+         BL    DSK@BJL
+         B     DSK@RT
+*
+DSK@RT   DS    0H
+         EPILOG
+*
+         LTORG
+*
+         DS    0D
+DSK@N    DS    F
+DSK@K    DS    F
+DSK@LDA  DS    F
+DSK@LDC  DS    F
+         DS    0C
+DSK@UP   DS    C
+DSK@TR   DS    C
+         DS    0D
+DSK@ALP  DS    D
+DSK@BET  DS    D
+DSK@AB   DS    F
+DSK@CB   DS    F
+DSK@SL   DS    F
+         DS    0D
+DSK@1    DC    X'3FF0000000000000'        BFP 1.0
+*
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   DSYRK

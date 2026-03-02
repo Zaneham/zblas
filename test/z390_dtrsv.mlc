@@ -1,0 +1,533 @@
+*---------------------------------------------------------------------*
+* Z390_DTRSV - Self-contained z390 test for DTRSV scalar path.       *
+* Two CSECTs: test harness + scalar DTRSV. No VF, no STFLE.          *
+* All doubles are IEEE 754 BFP (DC X'...'). 2x2 triangular.          *
+*                                                                     *
+* Solves op(A)*x = b in-place. Four structural cases: {U,L}x{N,T}.   *
+* Four ways to solve a triangle. None of them relaxing.              *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+* ---- TEST HARNESS ----
+*
+TSTDTRSV CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING TSTDTRSV,R12
+         LA    R10,TSAVE
+         ST    R13,4(,R10)
+         ST    R10,8(,R13)
+         LR    R13,R10
+*
+         WTO   'ZBLAS DTRSV z390 test'
+*
+* ============================================================= *
+* TEST 1: Upper, NoTrans, non-unit diag                          *
+* A=[1,0,3,2] col-major upper: {{1,3},{0,2}}                     *
+* x=[7,4]. x2=4/2=2, x1=(7-3*2)/1=1. Expected: [1, 2]           *
+* ============================================================= *
+*
+         WTO   'T1: U,N,nonunit'
+         MVC   T1X(16),T1XINI
+         LA    R1,T1PL
+         L     R15,=A(DTRSV)
+         BALR  R14,R15
+         LD    0,T1X
+         CDB   0,T1E1
+         BE    T1P1
+         WTO   'FAIL X1!=1'
+         B     T1C2
+T1P1     WTO   'PASS X1=1'
+T1C2     DS    0H
+         LD    0,T1X+8
+         CDB   0,T1E2
+         BE    T1P2
+         WTO   'FAIL X2!=2'
+         B     TST2
+T1P2     WTO   'PASS X2=2'
+*
+* ============================================================= *
+* TEST 2: Lower, NoTrans, non-unit diag                          *
+* A=[1,2,0,3] col-major lower: {{1,0},{2,3}}                     *
+* x=[3,12]. x1=3/1=3, x2=(12-2*3)/3=2. Expected: [3, 2]         *
+* ============================================================= *
+*
+TST2     DS    0H
+         WTO   'T2: L,N,nonunit'
+         MVC   T2X(16),T2XINI
+         LA    R1,T2PL
+         L     R15,=A(DTRSV)
+         BALR  R14,R15
+         LD    0,T2X
+         CDB   0,T2E1
+         BE    T2P1
+         WTO   'FAIL X1!=3'
+         B     T2K2
+T2P1     WTO   'PASS X1=3'
+T2K2     DS    0H
+         LD    0,T2X+8
+         CDB   0,T2E2
+         BE    T2P2
+         WTO   'FAIL X2!=2'
+         B     TST3
+T2P2     WTO   'PASS X2=2'
+*
+* ============================================================= *
+* TEST 3: Upper, NoTrans, unit diag                              *
+* A=[1,0,2,1] col-major (diag ignored). Upper off-diag A(0,1)=2 *
+* x=[7,2]. x2=2, x1=7-2*2=3. Expected: [3, 2]                   *
+* ============================================================= *
+*
+TST3     DS    0H
+         WTO   'T3: U,N,unit'
+         MVC   T3X(16),T3XINI
+         LA    R1,T3PL
+         L     R15,=A(DTRSV)
+         BALR  R14,R15
+         LD    0,T3X
+         CDB   0,T3E1
+         BE    T3P1
+         WTO   'FAIL X1!=3'
+         B     T3K2
+T3P1     WTO   'PASS X1=3'
+T3K2     DS    0H
+         LD    0,T3X+8
+         CDB   0,T3E2
+         BE    T3P2
+         WTO   'FAIL X2!=2'
+         B     TST4
+T3P2     WTO   'PASS X2=2'
+*
+* ============================================================= *
+* TEST 4: N=0, quick return (no crash)                           *
+* ============================================================= *
+*
+TST4     DS    0H
+         WTO   'T4: N=0'
+         LA    R1,T4PL
+         L     R15,=A(DTRSV)
+         BALR  R14,R15
+         WTO   'PASS N=0'
+*
+* ---- DONE ----
+*
+         WTO   'DTRSV: ALL TESTS DONE'
+         L     R13,4(,R13)
+         LM    R14,R12,12(R13)
+         SR    R15,R15
+         BR    R14
+*
+* ---- Test data ----
+*
+TSAVE    DS    18F
+*
+* ---- Test 1: Upper, N, non-unit ----
+* A=[1,0,3,2] col-major
+*
+         DS    0D
+T1UP     DC    X'E4'                       'U'
+T1TR     DC    X'D5'                       'N'
+T1DG     DC    X'D5'                       'N' (non-unit)
+         DS    0F
+T1N      DC    F'2'
+         DS    0D
+T1A      DC    X'3FF0000000000000'         1.0
+         DC    X'0000000000000000'         0.0
+         DC    X'4008000000000000'         3.0
+         DC    X'4000000000000000'         2.0
+T1LDA    DC    F'2'
+T1X      DC    X'401C000000000000'         7.0
+         DC    X'4010000000000000'         4.0
+T1IX     DC    F'1'
+T1XINI   DC    X'401C000000000000'         7.0
+         DC    X'4010000000000000'         4.0
+         DS    0D
+T1E1     DC    X'3FF0000000000000'         1.0
+T1E2     DC    X'4000000000000000'         2.0
+T1PL     DC    A(T1UP,T1TR,T1DG,T1N,T1A,T1LDA,T1X)
+         DC    X'80',AL3(T1IX)
+*
+* ---- Test 2: Lower, N, non-unit ----
+* A=[1,2,0,3] col-major
+*
+         DS    0D
+T2UP     DC    X'D3'                       'L'
+T2TR     DC    X'D5'                       'N'
+T2DG     DC    X'D5'                       'N' (non-unit)
+         DS    0F
+T2N      DC    F'2'
+         DS    0D
+T2A      DC    X'3FF0000000000000'         1.0
+         DC    X'4000000000000000'         2.0
+         DC    X'0000000000000000'         0.0
+         DC    X'4008000000000000'         3.0
+T2LDA    DC    F'2'
+T2X      DC    X'4008000000000000'         3.0
+         DC    X'4028000000000000'         12.0
+T2IX     DC    F'1'
+T2XINI   DC    X'4008000000000000'         3.0
+         DC    X'4028000000000000'         12.0
+         DS    0D
+T2E1     DC    X'4008000000000000'         3.0
+T2E2     DC    X'4000000000000000'         2.0
+T2PL     DC    A(T2UP,T2TR,T2DG,T2N,T2A,T2LDA,T2X)
+         DC    X'80',AL3(T2IX)
+*
+* ---- Test 3: Upper, N, unit diag ----
+* A=[1,0,2,1] col-major (diag values ignored)
+*
+         DS    0D
+T3UP     DC    X'E4'                       'U'
+T3TR     DC    X'D5'                       'N'
+T3DG     DC    X'E4'                       'U' (unit diag)
+         DS    0F
+T3N      DC    F'2'
+         DS    0D
+T3A      DC    X'3FF0000000000000'         1.0 (ignored)
+         DC    X'0000000000000000'         0.0
+         DC    X'4000000000000000'         2.0
+         DC    X'3FF0000000000000'         1.0 (ignored)
+T3LDA    DC    F'2'
+T3X      DC    X'401C000000000000'         7.0
+         DC    X'4000000000000000'         2.0
+T3IX     DC    F'1'
+T3XINI   DC    X'401C000000000000'         7.0
+         DC    X'4000000000000000'         2.0
+         DS    0D
+T3E1     DC    X'4008000000000000'         3.0
+T3E2     DC    X'4000000000000000'         2.0
+T3PL     DC    A(T3UP,T3TR,T3DG,T3N,T3A,T3LDA,T3X)
+         DC    X'80',AL3(T3IX)
+*
+* ---- Test 4: N=0 (quick return) ----
+*
+         DS    0D
+T4UP     DC    X'E4'                       'U'
+T4TR     DC    X'D5'                       'N'
+T4DG     DC    X'D5'                       'N'
+         DS    0F
+T4N      DC    F'0'
+         DS    0D
+T4A      DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+T4LDA    DC    F'2'
+T4X      DC    X'3FF0000000000000'
+         DC    X'3FF0000000000000'
+T4IX     DC    F'1'
+T4PL     DC    A(T4UP,T4TR,T4DG,T4N,T4A,T4LDA,T4X)
+         DC    X'80',AL3(T4IX)
+*
+         LTORG
+         DROP  R12
+*
+* ============================================================= *
+* DTRSV - scalar only (no VF, no STFLE, z390 safe)              *
+* Solves: op(A) * x = b  (x overwrites b in place)              *
+*                                                                 *
+* 8 parms via OS linkage. Handles all 4 cases: {U,L}x{N,T}.     *
+* ============================================================= *
+*
+DTRSV    CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING DTRSV,R12
+         LR    R11,R1
+*
+* ---- Extract parameters ----
+*
+         L     R1,0(,R11)
+         MVC   DTV@UP(1),0(R1)
+         L     R1,4(,R11)
+         MVC   DTV@TR(1),0(R1)
+         L     R1,8(,R11)
+         MVC   DTV@DG(1),0(R1)
+*
+         L     R1,12(,R11)
+         L     R1,0(,R1)
+         ST    R1,DTV@N
+*
+         L     R1,16(,R11)
+         ST    R1,DTV@AB
+         L     R1,20(,R11)
+         L     R1,0(,R1)
+         ST    R1,DTV@LDA
+*
+         L     R1,24(,R11)
+         ST    R1,DTV@XB
+         L     R1,28(,R11)
+         N     R1,=X'7FFFFFFF'
+         L     R1,0(,R1)
+         ST    R1,DTV@IX
+*
+* ---- Quick return ----
+*
+         L     R0,DTV@N
+         LTR   R0,R0
+         BNP   DTV@RT
+*
+* ---- Byte strides ----
+*
+         L     R8,DTV@LDA
+         SLA   R8,3
+         L     R7,DTV@IX
+         SLA   R7,3
+*
+* ---- Adjust X base for negative INCX ----
+*
+         LTR   R7,R7
+         BNM   DTV@GO
+         L     R0,DTV@N
+         BCTR  R0,0
+         MSR   R0,R7
+         LCR   R0,R0
+         L     R1,DTV@XB
+         AR    R1,R0
+         ST    R1,DTV@XB
+*
+* ---- Dispatch ----
+*
+DTV@GO   DS    0H
+         CLI   DTV@TR,X'D5'
+         BNE   DTV@TX
+         CLI   DTV@UP,X'E4'
+         BE    DTV@UN
+         B     DTV@LN
+DTV@TX   DS    0H
+         CLI   DTV@UP,X'E4'
+         BE    DTV@UT
+         B     DTV@LT
+*
+* ---- UPPER / NO-TRANS: back substitution ----
+*
+DTV@UN   DS    0H
+         L     R2,DTV@N
+         L     R5,DTV@AB
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R5,R0
+         L     R4,DTV@XB
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R7
+         AR    R4,R0
+*
+DTV@UJL  DS    0H
+         CLI   DTV@DG,X'D5'
+         BNE   DTV@USD
+         LR    R0,R2
+         BCTR  R0,0
+         SLA   R0,3
+         LR    R11,R5
+         AR    R11,R0
+         LD    0,0(,R4)
+         LD    2,0(,R11)
+         DDBR  0,2
+         STD   0,0(,R4)
+         B     DTV@UIN
+DTV@USD  DS    0H
+         LD    0,0(,R4)
+DTV@UIN  DS    0H
+         LR    R3,R2
+         BCTR  R3,0
+         LTR   R3,R3
+         BZ    DTV@UJN
+         L     R6,DTV@XB
+         LR    R11,R5
+DTV@UIL  DS    0H
+         LD    2,0(,R11)
+         MDBR  2,0
+         LD    4,0(,R6)
+         SDBR  4,2
+         STD   4,0(,R6)
+         LA    R11,8(,R11)
+         AR    R6,R7
+         BCT   R3,DTV@UIL
+*
+DTV@UJN  DS    0H
+         SR    R5,R8
+         SR    R4,R7
+         BCT   R2,DTV@UJL
+         B     DTV@RT
+*
+* ---- LOWER / NO-TRANS: forward substitution ----
+*
+DTV@LN   DS    0H
+         L     R5,DTV@AB
+         L     R4,DTV@XB
+         L     R2,DTV@N
+*
+DTV@LJL  DS    0H
+         L     R0,DTV@N
+         SR    R0,R2
+         SLA   R0,3
+         CLI   DTV@DG,X'D5'
+         BNE   DTV@LSD
+         LR    R11,R5
+         AR    R11,R0
+         LD    0,0(,R4)
+         LD    2,0(,R11)
+         DDBR  0,2
+         STD   0,0(,R4)
+         B     DTV@LIN
+DTV@LSD  DS    0H
+         LD    0,0(,R4)
+DTV@LIN  DS    0H
+         LR    R3,R2
+         BCTR  R3,0
+         LTR   R3,R3
+         BZ    DTV@LJN
+         LR    R6,R4
+         AR    R6,R7
+         LR    R11,R5
+         AR    R11,R0
+         LA    R11,8(,R11)
+DTV@LIL  DS    0H
+         LD    2,0(,R11)
+         MDBR  2,0
+         LD    4,0(,R6)
+         SDBR  4,2
+         STD   4,0(,R6)
+         LA    R11,8(,R11)
+         AR    R6,R7
+         BCT   R3,DTV@LIL
+*
+DTV@LJN  DS    0H
+         AR    R5,R8
+         AR    R4,R7
+         BCT   R2,DTV@LJL
+         B     DTV@RT
+*
+* ---- UPPER / TRANS: forward dot ----
+*
+DTV@UT   DS    0H
+         L     R5,DTV@AB
+         L     R4,DTV@XB
+         L     R2,DTV@N
+*
+DTV@TJL  DS    0H
+         LD    0,0(,R4)
+         L     R3,DTV@N
+         SR    R3,R2
+         LTR   R3,R3
+         BZ    DTV@TLS
+         L     R6,DTV@XB
+         LR    R11,R5
+DTV@TIL  DS    0H
+         LD    2,0(,R11)
+         MDB   2,0(,R6)
+         SDBR  0,2
+         LA    R11,8(,R11)
+         AR    R6,R7
+         BCT   R3,DTV@TIL
+*
+DTV@TLS  DS    0H
+         CLI   DTV@DG,X'D5'
+         BNE   DTV@TST
+         L     R0,DTV@N
+         SR    R0,R2
+         SLA   R0,3
+         LR    R11,R5
+         AR    R11,R0
+         LD    2,0(,R11)
+         DDBR  0,2
+DTV@TST  DS    0H
+         STD   0,0(,R4)
+*
+         AR    R5,R8
+         AR    R4,R7
+         BCT   R2,DTV@TJL
+         B     DTV@RT
+*
+* ---- LOWER / TRANS: backward dot ----
+*
+DTV@LT   DS    0H
+         L     R2,DTV@N
+         L     R5,DTV@AB
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R8
+         AR    R5,R0
+         L     R4,DTV@XB
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R7
+         AR    R4,R0
+*
+DTV@BJL  DS    0H
+         LD    0,0(,R4)
+         LR    R3,R2
+         BCTR  R3,0
+         LTR   R3,R3
+         BZ    DTV@BLS
+         LR    R6,R4
+         AR    R6,R7
+         L     R0,DTV@N
+         SR    R0,R2
+         LA    R0,1(,R0)
+         SLA   R0,3
+         LR    R11,R5
+         AR    R11,R0
+DTV@BIL  DS    0H
+         LD    2,0(,R11)
+         MDB   2,0(,R6)
+         SDBR  0,2
+         LA    R11,8(,R11)
+         AR    R6,R7
+         BCT   R3,DTV@BIL
+*
+DTV@BLS  DS    0H
+         CLI   DTV@DG,X'D5'
+         BNE   DTV@BST
+         L     R0,DTV@N
+         SR    R0,R2
+         SLA   R0,3
+         LR    R11,R5
+         AR    R11,R0
+         LD    2,0(,R11)
+         DDBR  0,2
+DTV@BST  DS    0H
+         STD   0,0(,R4)
+*
+         SR    R5,R8
+         SR    R4,R7
+         BCT   R2,DTV@BJL
+         B     DTV@RT
+*
+DTV@RT   DS    0H
+         LM    R14,R12,12(R13)
+         BR    R14
+*
+* ---- Local storage ----
+*
+         DS    0D
+DTV@N    DS    F
+DTV@LDA  DS    F
+DTV@IX   DS    F
+         DS    0C
+DTV@UP   DS    C
+DTV@TR   DS    C
+DTV@DG   DS    C
+         DS    0D
+DTV@AB   DS    F
+DTV@XB   DS    F
+DTV@SL   DS    F
+         LTORG
+         END   TSTDTRSV

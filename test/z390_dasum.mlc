@@ -1,0 +1,141 @@
+*---------------------------------------------------------------------*
+* Z390_DASUM - Self-contained z390 test for DASUM scalar path.       *
+* One file, two CSECTs, proper OS linkage. No VF instructions.       *
+* All floating-point constants are IEEE 754 BFP (DC X'...').         *
+* HFP may take a long walk off a short pier.                         *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+* ---- TEST HARNESS ----
+*
+TSTDASUM CSECT
+         STM   R14,R12,12(R13)            Save z390 context
+         LR    R12,R15                     Base = entry point
+         USING TSTDASUM,R12
+         LA    R10,TSAVE                   Our save area
+         ST    R13,4(,R10)                 Back-chain to z390 SA
+         ST    R10,8(,R13)                 Forward-chain
+         LR    R13,R10                     R13 = our SA
+*
+         WTO   'ZBLAS DASUM z390 test'
+*
+* ---- TEST 1: X=[1,-2,3,-4], N=4 -> sum=10.0 ----
+*
+         WTO   'T1: sum of abs [1,-2,3,-4]'
+         LA    R1,T1PL
+         L     R15,=A(DASUM)
+         BALR  R14,R15
+         CDB   0,T1EXP
+         BE    T1P1
+         WTO   'FAIL dasum!=10'
+         B     TST2
+T1P1     WTO   'PASS dasum=10'
+*
+* ---- TEST 2: N=0 -> FPR0=0.0 ----
+*
+TST2     DS    0H
+         WTO   'T2: N=0'
+         LA    R1,T2PL
+         L     R15,=A(DASUM)
+         BALR  R14,R15
+         CDB   0,DZERO
+         BE    T2P1
+         WTO   'FAIL N=0'
+         B     DONE
+T2P1     WTO   'PASS N=0'
+*
+* ---- DONE ----
+*
+DONE     DS    0H
+         WTO   'DASUM: ALL TESTS DONE'
+         L     R13,4(,R13)                 Restore z390 SA
+         LM    R14,R12,12(R13)             Restore z390 regs
+         SR    R15,R15                     RC=0
+         BR    R14
+*
+* ---- Test data (all doubles are IEEE 754 BFP hex) ----
+*
+TSAVE    DS    18F                         Our save area
+         DS    0D
+* BFP 0.0
+DZERO    DC    X'0000000000000000'
+*
+* Test 1: X=[1,-2,3,-4], N=4, INCX=1 -> |1|+|-2|+|3|+|-4| = 10
+T1N      DC    F'4'
+         DS    0D
+T1X      DC    X'3FF0000000000000'         BFP  1.0
+         DC    X'C000000000000000'         BFP -2.0
+         DC    X'4008000000000000'         BFP  3.0
+         DC    X'C010000000000000'         BFP -4.0
+T1IX     DC    F'1'
+         DS    0D
+T1EXP    DC    X'4024000000000000'         BFP 10.0
+T1PL     DC    A(T1N,T1X)
+         DC    X'80',AL3(T1IX)
+*
+* Test 2: N=0
+         DS    0D
+T2N      DC    F'0'
+         DS    0D
+T2X      DC    X'3FF0000000000000'         BFP 1.0 (never touched)
+T2IX     DC    F'1'
+T2PL     DC    A(T2N,T2X)
+         DC    X'80',AL3(T2IX)
+         LTORG
+         DROP  R12
+*
+* ============================================================= *
+* DASUM - Sum of absolute values (scalar only, no VF).          *
+* Parm list: N, DX, INCX (3 parms, high bit on last).           *
+* Returns sum(|X(i)|) in FPR0.                                  *
+* ============================================================= *
+*
+DASUM    CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING DASUM,R12
+         LR    R11,R1
+         SDBR  0,0                         FPR0 = 0.0
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   DAS@RT
+         L     R4,4(,R11)                  DX
+         L     R5,8(,R11)
+         L     R5,0(,R5)                   INCX
+         SLA   R5,3                        byte stride
+         LTR   R5,R5
+         BNM   DAS@SL
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R5
+         LCR   R0,R0
+         AR    R4,R0
+DAS@SL   DS    0H
+         LR    R8,R2
+DAS@S1   DS    0H
+         LD    2,0(,R4)
+         LPDBR 2,2                         FPR2 = |X(i)|
+         ADBR  0,2                         FPR0 += |X(i)|
+         AR    R4,R5
+         BCT   R8,DAS@S1
+DAS@RT   DS    0H
+         LM    R14,R12,12(R13)
+         BR    R14
+         LTORG
+         END   TSTDASUM

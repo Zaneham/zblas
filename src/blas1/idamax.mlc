@@ -1,0 +1,101 @@
+*---------------------------------------------------------------------*
+* IDAMAX -- Index of Double-precision Absolute MAXimum                *
+*                                                                     *
+* Finds: k such that |X(k)| = max( |X(i)| )  for i = 1..N           *
+*                                                                     *
+* OS linkage parm list (R1 -> address list):                          *
+*   +0  addr of N      (fullword integer)                             *
+*   +4  addr of DX     (float64 array)                                *
+*   +8  addr of INCX   (fullword integer, high bit set -- last parm)  *
+*                                                                     *
+* Return: 1-based index in R0 (0 if N <= 0).                         *
+*         FPR0 clobbered.                                             *
+*                                                                     *
+* Scalar only -- vectorising argmax is more trouble than it's worth   *
+* for a routine that's O(N) with no arithmetic. The branch predictor  *
+* does the heavy lifting here, not the FPU.                           *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG IDAMAX
+*
+         SR    R0,R0                       R0 = 0 (result if N<=0)
+*
+* ---- Load parameters ----
+*
+         LR    R11,R1
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   IDX@RT                      N <= 0 -> return 0
+*
+         L     R4,4(,R11)                  DX base
+         L     R5,8(,R11)                  Addr of INCX
+         L     R5,0(,R5)                   INCX
+*
+* ---- N=1 shortcut ----
+*
+         LA    R0,1                        Result = 1
+         CHI   R2,1
+         BE    IDX@RT
+*
+* ---- Convert stride ----
+*
+         SLA   R5,3                        Byte stride
+*
+* ---- Adjust base for negative INCX ----
+*
+         LTR   R5,R5
+         BNM   IDX@GO
+         LR    R3,R2
+         BCTR  R3,0
+         MSR   R3,R5
+         LCR   R3,R3
+         AR    R4,R3
+*
+* ---- Scan for maximum |X(i)| ----
+* R0  = best index (1-based)
+* R9  = current index (1-based)
+* FPR0 = best |X| so far
+* FPR2 = current |X(i)|
+*
+IDX@GO   DS    0H
+         LD    FPR0,0(,R4)                 FPR0 = X(1)
+         LPDBR FPR0,FPR0                   FPR0 = |X(1)|
+         LA    R0,1                        Best index = 1
+         LA    R9,1                        Current index = 1
+         AR    R4,R5                       Advance to X(2)
+         LR    R8,R2
+         BCTR  R8,0                        R8 = N-1 (remaining)
+         LTR   R8,R8
+         BZ    IDX@RT                      Only 1 element
+*
+IDX@S1   DS    0H
+         LA    R9,1(,R9)                   Current index++
+         LD    FPR2,0(,R4)
+         LPDBR FPR2,FPR2                   |X(i)|
+         CDBR  FPR2,FPR0                   Compare |X(i)| vs best
+         BNH   IDX@NX                      Not higher -> skip
+         LDR   FPR0,FPR2                   New best value
+         LR    R0,R9                       New best index
+IDX@NX   DS    0H
+         AR    R4,R5
+         BCT   R8,IDX@S1
+*
+* ============================================================= *
+* RETURN -- result in R0                                         *
+* ============================================================= *
+*
+IDX@RT   DS    0H
+         ST    R0,0(,R13)                  Stash result at SA+0
+         LM    R14,R12,12(R13)             Restore (R13 unchanged)
+         L     R0,0(,R13)                  Recover result into R0
+         BR    R14
+*
+         LTORG
+*
+         DS    0D
+ZB@STFL  DS    3D
+*
+         END   IDAMAX

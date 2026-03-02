@@ -1,0 +1,193 @@
+*---------------------------------------------------------------------*
+* TEST_DAXPY - z390 test harness for DAXPY                           *
+*                                                                     *
+* Tests:                                                              *
+*   1. Basic: alpha=2.0, X=[1,2,3,4], Y=[10,20,30,40], N=4           *
+*      Expected Y = [12, 24, 36, 48]                                  *
+*   2. Zero alpha: should leave Y unchanged                           *
+*   3. N=0: should leave Y unchanged                                  *
+*   4. Single element: N=1                                            *
+*                                                                     *
+* Results printed via WTO. On z390, WTO writes to the console.        *
+* "Testing is the process of comparing the invisible to the           *
+*  ambiguous so as to avoid the unthinkable happening to the          *
+*  anonymous." - James Bach, but in HLASM.                            *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  epilog
+*
+TEST     PROLOG TSTDAXPY
+*
+* ============================================================= *
+* TEST 1: Basic DAXPY, alpha=2.0, N=4                          *
+* ============================================================= *
+*
+         WTO   'TEST 1: DAXPY alpha=2.0, N=4'
+*
+* Set up Y = [10.0, 20.0, 30.0, 40.0] (reset for test)
+         LD    FPR2,T1Y1V                  10.0
+         STD   FPR2,T1Y1                   Y(1) = 10.0
+         LD    FPR2,T1Y2V                  20.0
+         STD   FPR2,T1Y2                   Y(2) = 20.0
+         LD    FPR2,T1Y3V                  30.0
+         STD   FPR2,T1Y3                   Y(3) = 30.0
+         LD    FPR2,T1Y4V                  40.0
+         STD   FPR2,T1Y4                   Y(4) = 40.0
+*
+* Build parm list for DAXPY(N, DA, DX, INCX, DY, INCY)
+         LA    R1,T1PLST                   Parm list
+         L     R15,=V(DAXPY)               Entry point
+         BALR  R14,R15                     Call DAXPY
+*
+* Verify Y(1) = 12.0 (2.0*1.0 + 10.0)
+         LD    FPR2,T1Y1                   Load result Y(1)
+         CDB   FPR2,T1E1                   Compare to 12.0
+         BE    T1P1                        Pass
+         WTO   'FAIL: Y(1) != 12.0'
+         B     T1C2
+T1P1     WTO   'PASS: Y(1) = 12.0'
+*
+* Verify Y(2) = 24.0 (2.0*2.0 + 20.0)
+T1C2     DS    0H
+         LD    FPR2,T1Y2
+         CDB   FPR2,T1E2                   Compare to 24.0
+         BE    T1P2
+         WTO   'FAIL: Y(2) != 24.0'
+         B     T1C3
+T1P2     WTO   'PASS: Y(2) = 24.0'
+*
+* Verify Y(3) = 36.0
+T1C3     DS    0H
+         LD    FPR2,T1Y3
+         CDB   FPR2,T1E3
+         BE    T1P3
+         WTO   'FAIL: Y(3) != 36.0'
+         B     T1C4
+T1P3     WTO   'PASS: Y(3) = 36.0'
+*
+* Verify Y(4) = 48.0
+T1C4     DS    0H
+         LD    FPR2,T1Y4
+         CDB   FPR2,T1E4
+         BE    T1P4
+         WTO   'FAIL: Y(4) != 48.0'
+         B     TST2
+T1P4     WTO   'PASS: Y(4) = 48.0'
+*
+* ============================================================= *
+* TEST 2: Zero alpha, Y should not change                       *
+* ============================================================= *
+*
+TST2     DS    0H
+         WTO   'TEST 2: DAXPY alpha=0.0'
+*
+* Reset Y to known values
+         LD    FPR2,T1Y1V
+         STD   FPR2,T2Y1
+         LD    FPR2,T1Y2V
+         STD   FPR2,T2Y2
+*
+         LA    R1,T2PLST
+         L     R15,=V(DAXPY)
+         BALR  R14,R15
+*
+* Y(1) should still be 10.0
+         LD    FPR2,T2Y1
+         CDB   FPR2,T1Y1V
+         BE    T2P1
+         WTO   'FAIL: alpha=0 modified Y'
+         B     TST3
+T2P1     WTO   'PASS: alpha=0 left Y unchanged'
+*
+* ============================================================= *
+* TEST 3: N=0, should be a no-op                               *
+* ============================================================= *
+*
+TST3     DS    0H
+         WTO   'TEST 3: DAXPY N=0'
+*
+         LA    R1,T3PLST
+         L     R15,=V(DAXPY)
+         BALR  R14,R15
+         WTO   'PASS: N=0 returned without crashing'
+*
+* ============================================================= *
+* Done                                                           *
+* ============================================================= *
+*
+         WTO   'ALL DAXPY TESTS COMPLETE'
+         EPILOG
+*
+* ---- Test 1 data ----
+*
+         DS    0D
+T1N      DC    F'4'                        N = 4
+T1A      DC    X'4000000000000000'         BFP 2.0
+T1X1     DC    X'3FF0000000000000'         BFP 1.0
+T1X2     DC    X'4000000000000000'         BFP 2.0
+T1X3     DC    X'4008000000000000'         BFP 3.0
+T1X4     DC    X'4010000000000000'         BFP 4.0
+T1INCX   DC    F'1'
+T1Y1     DC    X'4024000000000000'         BFP 10.0
+T1Y2     DC    X'4034000000000000'         BFP 20.0
+T1Y3     DC    X'403E000000000000'         BFP 30.0
+T1Y4     DC    X'4044000000000000'         BFP 40.0
+T1INCY   DC    F'1'
+*
+* Initial Y values (for reset)
+T1Y1V    DC    X'4024000000000000'         BFP 10.0
+T1Y2V    DC    X'4034000000000000'         BFP 20.0
+T1Y3V    DC    X'403E000000000000'         BFP 30.0
+T1Y4V    DC    X'4044000000000000'         BFP 40.0
+*
+* Expected results
+T1E1     DC    X'4028000000000000'         BFP 12.0 (2*1+10)
+T1E2     DC    X'4038000000000000'         BFP 24.0 (2*2+20)
+T1E3     DC    X'4042000000000000'         BFP 36.0 (2*3+30)
+T1E4     DC    X'4048000000000000'         BFP 48.0 (2*4+40)
+*
+* Parm list (OS linkage: list of addresses)
+T1PLST   DC    A(T1N)
+         DC    A(T1A)
+         DC    A(T1X1)
+         DC    A(T1INCX)
+         DC    A(T1Y1)
+         DC    X'80',AL3(T1INCY)           Last parm (high bit)
+*
+* ---- Test 2 data (zero alpha) ----
+*
+         DS    0D
+T2N      DC    F'2'
+T2A      DC    X'0000000000000000'         BFP 0.0
+T2X1     DC    X'4058C00000000000'         BFP 99.0
+T2X2     DC    X'4058C00000000000'         BFP 99.0
+T2INCX   DC    F'1'
+T2Y1     DC    X'4024000000000000'         BFP 10.0
+T2Y2     DC    X'4034000000000000'         BFP 20.0
+T2INCY   DC    F'1'
+*
+T2PLST   DC    A(T2N)
+         DC    A(T2A)
+         DC    A(T2X1)
+         DC    A(T2INCX)
+         DC    A(T2Y1)
+         DC    X'80',AL3(T2INCY)
+*
+* ---- Test 3 data (N=0) ----
+*
+T3N      DC    F'0'
+T3A      DC    X'4014000000000000'         BFP 5.0
+T3X1     DC    X'3FF0000000000000'         BFP 1.0
+T3INCX   DC    F'1'
+T3Y1     DC    X'3FF0000000000000'         BFP 1.0
+T3INCY   DC    F'1'
+*
+T3PLST   DC    A(T3N)
+         DC    A(T3A)
+         DC    A(T3X1)
+         DC    A(T3INCX)
+         DC    A(T3Y1)
+         DC    X'80',AL3(T3INCY)
+*
+         LTORG
+         END   TSTDAXPY

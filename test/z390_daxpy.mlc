@@ -1,0 +1,213 @@
+*---------------------------------------------------------------------*
+* Z390_DAXPY - Self-contained z390 test for DAXPY scalar path.       *
+* One file, two CSECTs, proper OS linkage. No VF instructions.       *
+*---------------------------------------------------------------------*
+R0       EQU   0
+R1       EQU   1
+R2       EQU   2
+R3       EQU   3
+R4       EQU   4
+R5       EQU   5
+R6       EQU   6
+R7       EQU   7
+R8       EQU   8
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12
+R13      EQU   13
+R14      EQU   14
+R15      EQU   15
+*
+* ---- TEST HARNESS ----
+*
+TSTDAXPY CSECT
+         STM   R14,R12,12(R13)            Save z390 context
+         LR    R12,R15                     Base = entry point
+         USING TSTDAXPY,R12
+         LA    R10,TSAVE                   Our save area
+         ST    R13,4(,R10)                 Back-chain to z390 SA
+         ST    R10,8(,R13)                 Forward-chain
+         LR    R13,R10                     R13 = our SA
+*
+         WTO   'ZBLAS DAXPY z390 test'
+*
+* ---- CALL HELPER ----
+* R13 -> TSAVE. DAXPY does STM/LM into 12(R13) = TSAVE.
+* After return, R12 is restored (DAXPY saved it).
+* We return to z390 via z390's SA at TSAVE+4, untouched.
+*
+* ---- TEST 1: alpha=2, N=4 ----
+*
+         WTO   'T1: alpha=2, N=4'
+         MVC   T1Y(32),T1YINI             Reset Y
+         LA    R1,T1PL
+         L     R15,=A(DAXPY)
+         BALR  R14,R15
+* R12 restored by DAXPY LM. Check results.
+         LD    0,T1Y                       Y(1)
+         CDB   0,T1E1
+         BE    T1P1
+         WTO   'FAIL Y1!=12'
+         B     T1C2
+T1P1     WTO   'PASS Y1=12'
+T1C2     DS    0H
+         LD    0,T1Y+8                     Y(2)
+         CDB   0,T1E2
+         BE    T1P2
+         WTO   'FAIL Y2!=24'
+         B     T1C3
+T1P2     WTO   'PASS Y2=24'
+T1C3     DS    0H
+         LD    0,T1Y+16                    Y(3)
+         CDB   0,T1E3
+         BE    T1P3
+         WTO   'FAIL Y3!=36'
+         B     T1C4
+T1P3     WTO   'PASS Y3=36'
+T1C4     DS    0H
+         LD    0,T1Y+24                    Y(4)
+         CDB   0,T1E4
+         BE    T1P4
+         WTO   'FAIL Y4!=48'
+         B     TST2
+T1P4     WTO   'PASS Y4=48'
+*
+* ---- TEST 2: alpha=0 ----
+*
+TST2     DS    0H
+         WTO   'T2: alpha=0'
+         MVC   T2Y(16),T2YINI
+         LA    R1,T2PL
+         L     R15,=A(DAXPY)
+         BALR  R14,R15
+         LD    0,T2Y
+         CDB   0,T2YINI
+         BE    T2P1
+         WTO   'FAIL alpha=0'
+         B     TST3
+T2P1     WTO   'PASS alpha=0'
+*
+* ---- TEST 3: N=0 ----
+*
+TST3     DS    0H
+         WTO   'T3: N=0'
+         LA    R1,T3PL
+         L     R15,=A(DAXPY)
+         BALR  R14,R15
+         WTO   'PASS N=0'
+*
+* ---- DONE ----
+*
+         WTO   'DAXPY: ALL TESTS DONE'
+         L     R13,4(,R13)                 Restore z390 SA
+         LM    R14,R12,12(R13)             Restore z390 regs
+         SR    R15,R15                     RC=0
+         BR    R14
+*
+* ---- Test data ----
+*
+TSAVE    DS    18F                         Our save area
+         DS    0D
+T1N      DC    F'4'
+T1A      DC    X'4000000000000000'         BFP 2.0
+T1X      DC    X'3FF0000000000000'         BFP 1.0
+         DC    X'4000000000000000'         BFP 2.0
+         DC    X'4008000000000000'         BFP 3.0
+         DC    X'4010000000000000'         BFP 4.0
+T1IX     DC    F'1'
+T1Y      DC    X'4024000000000000'         BFP 10.0
+         DC    X'4034000000000000'         BFP 20.0
+         DC    X'403E000000000000'         BFP 30.0
+         DC    X'4044000000000000'         BFP 40.0
+T1IY     DC    F'1'
+T1YINI   DC    X'4024000000000000'         BFP 10.0
+         DC    X'4034000000000000'         BFP 20.0
+         DC    X'403E000000000000'         BFP 30.0
+         DC    X'4044000000000000'         BFP 40.0
+T1E1     DC    X'4028000000000000'         BFP 12.0
+T1E2     DC    X'4038000000000000'         BFP 24.0
+T1E3     DC    X'4042000000000000'         BFP 36.0
+T1E4     DC    X'4048000000000000'         BFP 48.0
+T1PL     DC    A(T1N,T1A,T1X,T1IX,T1Y)
+         DC    X'80',AL3(T1IY)
+         DS    0D
+T2N      DC    F'2'
+T2A      DC    X'0000000000000000'         BFP 0.0
+T2X      DC    X'4058C00000000000'         BFP 99.0
+         DC    X'4058C00000000000'         BFP 99.0
+T2IX     DC    F'1'
+T2Y      DC    X'4024000000000000'         BFP 10.0
+         DC    X'4034000000000000'         BFP 20.0
+T2IY     DC    F'1'
+T2YINI   DC    X'4024000000000000'         BFP 10.0
+         DC    X'4034000000000000'         BFP 20.0
+T2PL     DC    A(T2N,T2A,T2X,T2IX,T2Y)
+         DC    X'80',AL3(T2IY)
+         DS    0D
+T3N      DC    F'0'
+T3A      DC    X'4014000000000000'         BFP 5.0
+T3X      DC    X'3FF0000000000000'         BFP 1.0
+T3IX     DC    F'1'
+T3Y      DC    X'3FF0000000000000'         BFP 1.0
+T3IY     DC    F'1'
+T3PL     DC    A(T3N,T3A,T3X,T3IX,T3Y)
+         DC    X'80',AL3(T3IY)
+         LTORG
+         DROP  R12
+*
+* ============================================================= *
+* DAXPY - scalar only (no VF, no STFLE, z390 safe)              *
+* ============================================================= *
+*
+DAXPY    CSECT
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         USING DAXPY,R12
+         LR    R11,R1                      Parm ptr
+         L     R2,0(,R11)
+         L     R2,0(,R2)                   N
+         LTR   R2,R2
+         BNP   DXP@RT
+         L     R3,4(,R11)
+         LD    0,0(,R3)                    alpha
+         LTDBR 0,0
+         BZ    DXP@RT
+         L     R4,8(,R11)                  DX
+         L     R5,12(,R11)
+         L     R5,0(,R5)                   INCX
+         L     R6,16(,R11)                 DY
+         L     R7,20(,R11)
+         L     R7,0(,R7)                   INCY
+         SLA   R5,3                        byte stride
+         SLA   R7,3
+         LTR   R5,R5
+         BNM   DXP@AY
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R5
+         LCR   R0,R0
+         AR    R4,R0
+DXP@AY   DS    0H
+         LTR   R7,R7
+         BNM   DXP@SL
+         LR    R0,R2
+         BCTR  R0,0
+         MSR   R0,R7
+         LCR   R0,R0
+         AR    R6,R0
+DXP@SL   DS    0H
+         LR    R8,R2
+DXP@S1   DS    0H
+         LD    2,0(,R4)
+         MDBR  2,0
+         ADB   2,0(,R6)
+         STD   2,0(,R6)
+         AR    R4,R5
+         AR    R6,R7
+         BCT   R8,DXP@S1
+DXP@RT   DS    0H
+         LM    R14,R12,12(R13)
+         BR    R14
+         LTORG
+         END   TSTDAXPY

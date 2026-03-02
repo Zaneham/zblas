@@ -1,0 +1,158 @@
+*---------------------------------------------------------------------*
+* DAXPY - Double-precision A*X Plus Y                                 *
+*                                                                     *
+* Computes: Y(i) = alpha * X(i) + Y(i)   for i = 1..N                *
+*                                                                     *
+* OS linkage parm list (R1 -> address list):                          *
+*   +0  addr of N      (fullword integer)                             *
+*   +4  addr of DA     (float64 scalar, the alpha)                    *
+*   +8  addr of DX     (float64 array)                                *
+*  +12  addr of INCX   (fullword integer)                             *
+*  +16  addr of DY     (float64 array)                                *
+*  +20  addr of INCY   (fullword integer, high bit set, last parm)   *
+*                                                                     *
+* Return: nothing (Y modified in place). FPR0 clobbered.              *
+*                                                                     *
+* Two paths: Vector Facility (z13+) and scalar fallback.              *
+* VF path uses VFMA to process 2 doubles per iteration.               *
+* Scalar path does them one at a time, like a gentleman.              *
+*---------------------------------------------------------------------*
+         COPY  prolog
+         COPY  vfregs
+*
+         PROLOG DAXPY
+*
+* ---- Load parameters from R1 parm list ----
+*
+         LR    R11,R1                      Save parm list ptr
+         L     R2,0(,R11)                  Addr of N
+         L     R2,0(,R2)                   N (element count)
+         LTR   R2,R2                       N <= 0?
+         BNP   DXP@RT                      Nothing to do
+*
+         L     R3,4(,R11)                  Addr of DA
+         LD    FPR0,0(,R3)                 alpha -> FPR0
+         LTDBR FPR0,FPR0                   alpha == 0.0?
+         BZ    DXP@RT                      Zero alpha -> no work
+*
+         L     R4,8(,R11)                  DX base address
+         L     R5,12(,R11)                 Addr of INCX
+         L     R5,0(,R5)                   INCX
+         L     R6,16(,R11)                 DY base address
+         L     R7,20(,R11)                 Addr of INCY
+         L     R7,0(,R7)                   INCY
+*
+* ---- Unit stride check ----
+* Only the VF path requires INCX=1, INCY=1.
+*
+         CHI   R5,1                        INCX == 1?
+         BNE   DXP@SC                      Non-unit -> scalar
+         CHI   R7,1                        INCY == 1?
+         BNE   DXP@SC                      Non-unit -> scalar
+*
+* ---- Probe for Vector Facility ----
+*
+         VFTEST R0
+         BZ    DXP@SU                      No VF -> scalar unit
+*
+* ============================================================= *
+* VECTOR PATH: unit stride, 2 doubles/iter via VFMA             *
+*                                                                 *
+* Registers:                                                      *
+*   FPR0      = alpha (scalar)                                    *
+*   V0        = alpha broadcast to both 64-bit lanes              *
+*   V1        = X(i), X(i+1)                                     *
+*   V2        = Y(i), Y(i+1)                                     *
+*   R4        = X cursor        R6  = Y cursor                   *
+*   R8        = pair count       R2  = N (preserved)              *
+* ============================================================= *
+*
+         VREPG V0,V0,0                     Broadcast FPR0 -> V0
+*                                          (FPR0 overlaps V0 high)
+         LR    R8,R2                       R8 = N
+         SRL   R8,1                        R8 = N / 2 (pairs)
+         LTR   R8,R8                       Any pairs?
+         BZ    DXP@VR                      None -> just remainder
+*
+DXP@VL   DS    0H                          ---- Vector loop ----
+         VL    V1,0(,R4)                 Load X pair (16B)
+         VL    V2,0(,R6)                 Load Y pair (16B)
+         VFMA  V2,V0,V1,V2,3,0            Y = alpha*X + Y
+         VST   V2,0(,R6)                Store Y pair (16B)
+         LA    R4,16(,R4)                  X += 16
+         LA    R6,16(,R6)                  Y += 16
+         BCT   R8,DXP@VL                   Decrement & branch
+*
+* ---- Vector remainder (N odd -> 1 leftover) ----
+*
+DXP@VR   DS    0H
+         TML   R2,X'0001'                 N odd?
+         BZ    DXP@RT                      Even -> done
+         LD    FPR2,0(,R4)                 Load last X
+         MDBR  FPR2,FPR0                   FPR2 = alpha * X
+         ADB   FPR2,0(,R6)                 FPR2 += Y
+         STD   FPR2,0(,R6)                 Store Y
+         B     DXP@RT                      Done
+*
+* ============================================================= *
+* SCALAR PATH (unit stride): stride = 8, skip the drama.    *
+* Falls through from VF probe failure.                            *
+* ============================================================= *
+*
+DXP@SU   DS    0H
+         LA    R5,8                        INCX bytes = 8
+         LA    R7,8                        INCY bytes = 8
+         B     DXP@SL                      Enter scalar loop
+*
+* ============================================================= *
+* SCALAR PATH (general): any stride including negative.          *
+*                                                                 *
+* Converts INCX/INCY to byte offsets (* 8 for doubles).          *
+* Negative strides: adjust base per BLAS convention.              *
+* base += (1-N) * INC * 8  (walks backwards from end)            *
+* Your grandad wrote one of these in 1979 and it still works.    *
+* ============================================================= *
+*
+DXP@SC   DS    0H
+         SLA   R5,3                        INCX * 8 -> byte stride
+         SLA   R7,3                        INCY * 8 -> byte stride
+*
+* ---- Adjust base for negative INCX ----
+         LTR   R5,R5                       INCX < 0?
+         BNM   DXP@AY                      Non-negative -> skip
+         LR    R0,R2                       R0 = N
+         BCTR  R0,0                        R0 = N - 1
+         MSR   R0,R5                       R0 = (N-1) * byte_stride
+         LCR   R0,R0                       R0 = (1-N) * byte_stride
+         AR    R4,R0                       Adjust DX base
+*
+* ---- Adjust base for negative INCY ----
+DXP@AY   DS    0H
+         LTR   R7,R7                       INCY < 0?
+         BNM   DXP@SL                      Non-negative -> skip
+         LR    R0,R2                       R0 = N
+         BCTR  R0,0                        R0 = N - 1
+         MSR   R0,R7                       R0 = (N-1) * byte_stride
+         LCR   R0,R0                       R0 = (1-N) * byte_stride
+         AR    R6,R0                       Adjust DY base
+*
+DXP@SL   DS    0H                          ---- Scalar loop ----
+         LR    R8,R2                       R8 = N (counter)
+*
+DXP@S1   DS    0H
+         LD    FPR2,0(,R4)                 FPR2 = X(i)
+         MDBR  FPR2,FPR0                   FPR2 = alpha * X(i)
+         ADB   FPR2,0(,R6)                 FPR2 += Y(i)
+         STD   FPR2,0(,R6)                 Y(i) = result
+         AR    R4,R5                       X += stride
+         AR    R6,R7                       Y += stride
+         BCT   R8,DXP@S1                   Decrement & loop
+*
+DXP@RT   DS    0H
+         EPILOG
+*
+         LTORG
+         DS    0D
+ZB@STFL  DS    3D                          24 bytes for STFLE
+*
+         END   DAXPY
