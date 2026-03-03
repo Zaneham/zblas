@@ -139,5 +139,5 @@ xlc -Wc,XPLINK -o testaxpy testaxpy.c -lzblas
 - Array parameters point to the first element. The routines compute
   offsets from the base using the increment parameters.
 
-- Negative increments are supported (Phase 2). The starting position
+- Negative increments are supported. The starting position
   is adjusted per BLAS convention: `offset = (1-N)*INC*8`.
