@@ -1,11 +1,11 @@
 *---------------------------------------------------------------------*
 * DTRSV - Double-precision TRiangular Solve (Vector)                  *
 *                                                                     *
-* Solves op(A)*x = b in place. {U,L} x {N,T}, unit/non-unit diag.    *
+* Solves op(A)*x = b in place. {U,L} x {N,T}, unit/non-unit diag.     *
 *                                                                     *
 * OS linkage (R1 -> addr list, 8 parms):                              *
-*   +0  UPLO (char)  +4  TRANS (char) +8  DIAG (char) +12 N (F)      *
-*  +16  A (array)   +20  LDA (F)     +24  X (array)   +28 INCX(0x80) *
+*   +0  UPLO (char)  +4  TRANS (char) +8  DIAG (char) +12 N (F)       *
+*  +16  A (array)   +20  LDA (F)     +24  X (array)   +28 INCX(0x80)  *
 *                                                                     *
 * Scalar only. Not reentrant.                                         *
 * Written in the hope that nobody will ever need to debug it.         *
