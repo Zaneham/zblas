@@ -3,12 +3,12 @@
 *                                                                     *
 * y := alpha * op(A) * x + beta * y                                   *
 *   op(A) = A if TRANS='N', A' if TRANS='T'/'C'                       *
-*   Column-major: A(i,j) at A + j*LDA*8 + i*8                        *
+*   Column-major: A(i,j) at A + j*LDA*8 + i*8                         *
 *                                                                     *
 * OS linkage (R1 -> addr list, 11 parms):                             *
-*   +0  TRANS (char)  +4  M (F)     +8  N (F)    +12 ALPHA (D)       *
-*  +16  A (array)    +20  LDA (F)  +24  X (array) +28 INCX (F)       *
-*  +32  BETA (D)     +36  Y (array) +40 INCY (F, 0x80)               *
+*   +0  TRANS (char)  +4  M (F)     +8  N (F)    +12 ALPHA (D)        *
+*  +16  A (array)    +20  LDA (F)  +24  X (array) +28 INCX (F)        *
+*  +32  BETA (D)     +36  Y (array) +40 INCY (F, 0x80)                *
 *                                                                     *
 * Scalar only. Not reentrant.                                         *
 * Eleven parameters. The API designers were paid by the argument.     *
